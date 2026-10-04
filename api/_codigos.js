@@ -2,13 +2,14 @@
 // La API key vive solo acá (variables de entorno), nunca en el navegador.
 //
 // Variables de entorno:
-//   BARCODE_PROVEEDOR  'upcitemdb' (por defecto) | 'eansearch' | 'barcodelookup'
-//   BARCODE_API_KEY    key del proveedor. upcitemdb funciona sin key (modo prueba: 100 consultas/día)
+//   BARCODE_PROVEEDOR  catálogos a consultar, en orden, separados por coma. Se usa el primero que lo encuentre.
+//                      Por defecto 'upcitemdb,openfacts'. Otros: 'eansearch', 'barcodelookup' (pagos).
+//   BARCODE_API_KEY    key del proveedor pago. upcitemdb (100 consultas/día) y openfacts andan sin key.
 //
 // Todas las respuestas se normalizan a:
 //   { encontrado, codigo, nombre, marca, categoriaExterna, descripcion, imagenes[], fuente }
 
-const TIMEOUT_MS = 6000;
+const TIMEOUT_MS = 4000; // por catálogo
 const TTL_ENCONTRADO = 7 * 24 * 3600 * 1000; // 7 días
 const TTL_NO_ENCONTRADO = 24 * 3600 * 1000;  // 1 día: puede que lo agreguen al catálogo
 const cache = new Map(); // vive mientras la instancia del servidor siga activa
@@ -88,6 +89,28 @@ const PROVEEDORES = {
       descripcion: limpiar(it.description), imagenes: (it.images || []).filter(u => /^https:\/\//.test(u)),
     };
   },
+
+  // Open Food Facts y sus bases hermanas (productos, cosmética, mascotas). Gratis y sin key.
+  // Tiene buena cobertura de alimentos argentinos; de productos no alimenticios, poca.
+  // https://openfoodfacts.github.io/openfoodfacts-server/api/
+  async openfacts(codigo) {
+    const campos = 'product_name,product_name_es,brands,categories,generic_name,generic_name_es,image_front_url';
+    const { status, datos } = await pedir(
+      `https://world.openfoodfacts.org/api/v2/product/${codigo}?product_type=all&lc=es&fields=${campos}`,
+      { headers: { 'User-Agent': 'CargaProductosRiegosDelSur/1.0' } },
+    );
+    if (status === 404 || datos?.status === 0) return noEncontrado(codigo, 'openfacts');
+    if (status !== 200 || !datos?.product) throw errorProveedor('openfacts', status, datos);
+    const p = datos.product;
+    return {
+      encontrado: true, codigo, fuente: 'openfacts',
+      nombre: limpiar(p.product_name_es || p.product_name),
+      marca: limpiar(String(p.brands || '').split(',')[0]),
+      categoriaExterna: limpiar(p.categories),
+      descripcion: limpiar(p.generic_name_es || p.generic_name),
+      imagenes: /^https:\/\//.test(p.image_front_url || '') ? [p.image_front_url] : [],
+    };
+  },
 };
 
 async function buscarCodigo(valor) {
@@ -97,19 +120,27 @@ async function buscarCodigo(valor) {
   const enCache = cache.get(codigo);
   if (enCache && enCache.vence > Date.now()) return { ...enCache.resultado, cache: true };
 
-  const nombreProveedor = process.env.BARCODE_PROVEEDOR || 'upcitemdb';
-  const proveedor = PROVEEDORES[nombreProveedor];
-  if (!proveedor) throw Object.assign(new Error(`Proveedor de códigos desconocido: ${nombreProveedor}`), { status: 500 });
+  const nombres = (process.env.BARCODE_PROVEEDOR || 'upcitemdb,openfacts').split(',').map(s => s.trim()).filter(Boolean);
+  const desconocido = nombres.find(n => !PROVEEDORES[n]);
+  if (desconocido) throw Object.assign(new Error(`Proveedor de códigos desconocido: ${desconocido}`), { status: 500 });
 
-  let resultado;
-  try {
-    resultado = await proveedor(codigo, process.env.BARCODE_API_KEY);
-  } catch (e) {
-    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
-      throw Object.assign(new Error('El catálogo global tardó demasiado en responder.'), { status: 504 });
+  // Se prueba cada catálogo en orden. Si uno falla, se sigue con el próximo;
+  // solo se informa error si fallaron todos y ninguno dijo "no está".
+  let resultado = null;
+  let ultimoError = null;
+  for (const nombre of nombres) {
+    try {
+      const r = await PROVEEDORES[nombre](codigo, process.env.BARCODE_API_KEY);
+      if (r.encontrado) { resultado = r; break; }
+      resultado = resultado || r;
+    } catch (e) {
+      ultimoError = e.name === 'TimeoutError' || e.name === 'AbortError'
+        ? Object.assign(new Error('El catálogo global tardó demasiado en responder.'), { status: 504 })
+        : e;
     }
-    throw e;
   }
+  if (!resultado) throw ultimoError;
+  if (!resultado.encontrado) resultado.fuente = nombres.join(', ');
   resultado.digitoValido = digitoValido(codigo);
   cache.set(codigo, { resultado, vence: Date.now() + (resultado.encontrado ? TTL_ENCONTRADO : TTL_NO_ENCONTRADO) });
   return resultado;

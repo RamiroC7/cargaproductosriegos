@@ -33,5 +33,5 @@ window.CONFIG = {
   FOTO_LADO_MAXIMO: 2048, // px
 
   // Tiempo máximo para esperar la búsqueda del código de barras antes de pasar a carga manual.
-  BUSQUEDA_TIMEOUT_MS: 8000,
+  BUSQUEDA_TIMEOUT_MS: 10000,
 };

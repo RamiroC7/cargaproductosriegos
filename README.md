@@ -55,7 +55,7 @@ Si el SKU ya existe en Tiendanube, el producto no se crea de nuevo. Si se corta 
 ## Código de barras
 
 - `api/codigo-barras.js` + `api/_codigos.js`: consulta el catálogo global desde el servidor (la key nunca llega al navegador), con caché de 7 días (1 día si no lo encontró) y corte a los 6 s.
-- Proveedor en `BARCODE_PROVEEDOR` (`upcitemdb` por defecto, `eansearch`, `barcodelookup`) y su key en `BARCODE_API_KEY`. upcitemdb anda sin key con un límite de 100 consultas por día.
+- Catálogos en `BARCODE_PROVEEDOR`, en orden y separados por coma (por defecto `upcitemdb,openfacts`; también `eansearch` y `barcodelookup`, pagos, con key en `BARCODE_API_KEY`). Se usa el primero que encuentre el producto. upcitemdb: 100 consultas por día, fuerte en importados. Open Food Facts: gratis, tiene alimentos argentinos y pocos productos no alimenticios.
 - Estados del formulario: `escaneando` → `buscando_info` → `completado_automatico` o `modo_manual` → `guardando`. Solo se completan campos vacíos y quedan marcados en azul.
 - **Ojo:** en las pruebas, los productos argentinos (códigos 779…) no aparecieron en upcitemdb. Para el vivero y lo artesanal la carga va a ser manual de todos modos.
 
