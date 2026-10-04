@@ -27,24 +27,28 @@ api/                backend para Vercel que habla con Tiendanube (el token nunca
 | Marca | `brand` |
 | Fotos | `POST /products/{id}/images` (base64, una por pedido, en orden) |
 | Proveedor | No se envía (dato interno) |
+| Precio de venta y cantidad en stock | `variants[].price`, `variants[].stock` (con `stock_management: true`) |
+| Código de barras | `variants[].barcode` |
 
-**Precio y stock no se cargan acá**: se espera que Contabilium los sincronice por SKU.
-Si eso no pasa, el producto se publica sin precio. Para evitarlo, poné `PUBLICAR_VISIBLE: false` en `js/config.js`.
+Si Contabilium sincroniza precio y stock por SKU, va a pisar lo que se cargue acá.
 
-## Probarlo ya (sin conexión)
+## Ingreso (administrador único)
 
-Abrí `index.html` en Chrome. Los productos quedan guardados en ese navegador y se pueden exportar a JSON con el formato listo para la API.
+La app pide usuario y contraseña al abrirse. Hay un solo usuario, definido en Vercel:
+
+- `ADMIN_USUARIO` y `ADMIN_CLAVE`: usuario y contraseña del administrador.
+- `SESION_SECRETO`: texto aleatorio de 32 caracteres o más para firmar las sesiones. Si se cambia, se cierran todas las sesiones abiertas.
+
+La sesión dura 12 horas y se guarda en una cookie `HttpOnly` (el JavaScript de la página no la puede leer). Después de 5 intentos fallidos desde la misma IP, se bloquea 15 minutos. Toda la API (`/api/*`) exige sesión, salvo `login`, `sesion`, `logout` y `estado`.
 
 ## Conectarlo con Tiendanube
 
 1. En el [Portal de Partners](https://partners.tiendanube.com) creá una app con permisos de **write_products**, instalala en la tienda y guardá el `access_token` y el `store_id` (`user_id`).
-2. Subí esta carpeta a Vercel y cargá estas variables de entorno:
+2. Cargá estas variables de entorno en Vercel:
    - `TN_STORE_ID`
    - `TN_ACCESS_TOKEN`
    - `TN_USER_AGENT`, por ejemplo `Carga Riegos del Sur (mail@dominio.com)`
-   - `CARGA_CLAVE`: una clave que le pasás a la CM
-3. En `js/config.js` poné `API_BASE: '.'`.
-4. La primera vez que la CM toque **Publicar**, le va a pedir la clave.
+3. Volvé a publicar (`npx vercel deploy --prod`).
 
 Si el SKU ya existe en Tiendanube, el producto no se crea de nuevo. Si se corta a mitad, al reintentar sigue desde la última foto subida.
 
@@ -60,7 +64,7 @@ Si el SKU ya existe en Tiendanube, el producto no se crea de nuevo. Si se corta 
 ```
 node .claude/servidor.js
 ```
-Abrí http://localhost:5173. La clave de carga en local es `prueba`.
+Abrí http://localhost:5173. En local el usuario es `admin` y la contraseña `prueba` (solo en tu compu; en Vercel se usan las variables de entorno).
 
 ## Pendientes
 

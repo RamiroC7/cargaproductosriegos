@@ -42,8 +42,41 @@
         <button type="button" class="tab" role="tab" data-vista="form" aria-selected="true">Cargar</button>
         <button type="button" class="tab" role="tab" data-vista="lista" aria-selected="false">Cargados <span id="contador" class="ml-1 text-xs text-slate-400"></span></button>
       </nav>
+      <button type="button" id="btn-salir" class="shrink-0 -mr-2 w-9 h-9 grid place-items-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Cerrar sesión" title="Cerrar sesión">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+      </button>
     </div>
   </header>
+
+  <!-- Login: tapa toda la app hasta que haya sesión -->
+  <div id="login" class="fixed inset-0 z-[55] bg-slate-50 overflow-y-auto">
+    <div class="min-h-full grid place-items-center px-4 py-10">
+      <form id="form-login" class="w-full max-w-sm" novalidate>
+        <div class="flex flex-col items-center text-center mb-6">
+          <div class="w-12 h-12 rounded-xl bg-teal-700 text-white grid place-items-center text-lg font-bold">RS</div>
+          <h1 class="mt-3 text-xl font-semibold text-slate-900">Riegos del Sur</h1>
+          <p class="text-sm text-slate-500">Carga de productos</p>
+        </div>
+        <div class="card space-y-4">
+          <div>
+            <label class="lbl" for="login-usuario">Usuario</label>
+            <input id="login-usuario" name="usuario" class="inp" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+          </div>
+          <div>
+            <label class="lbl" for="login-clave">Contraseña</label>
+            <div class="relative">
+              <input id="login-clave" name="clave" type="password" class="inp pr-11" autocomplete="current-password" required>
+              <button type="button" id="btn-ver-clave" class="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 grid place-items-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Mostrar contraseña">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+          </div>
+          <p id="login-error" class="hidden text-sm text-red-600" role="alert"></p>
+          <button type="submit" id="btn-ingresar" class="btn-primario w-full">Ingresar</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <main class="max-w-3xl mx-auto px-4 pt-6 pb-10">
 
@@ -102,8 +135,8 @@
 
           <!-- Precio y stock -->
           <div class="card">
-            <h2 class="card-titulo">Precio y stock</h2>
-            <p class="card-ayuda">Precio final de venta en pesos.</p>
+            <h2 class="card-titulo">Precio y cantidad</h2>
+            <p class="card-ayuda">Precio final de venta en pesos y cuántas unidades hay disponibles.</p>
             <div class="grid grid-cols-2 gap-4">
               <div data-campo="precio">
                 <label class="lbl" for="precio">Precio de venta <span class="text-red-600">*</span></label>
@@ -113,11 +146,11 @@
                 </div>
               </div>
               <div data-campo="stock" id="grupo-stock">
-                <label class="lbl" for="stock">Stock inicial <span class="text-red-600">*</span></label>
+                <label class="lbl" for="stock">Cantidad en stock <span class="text-red-600">*</span></label>
                 <input id="stock" name="stock" class="inp" inputmode="numeric" placeholder="10">
               </div>
             </div>
-            <p id="ayuda-stock-variantes" class="ayuda hidden">Con variantes, el stock se carga en cada una. Si una variante tiene otro precio, también se indica ahí.</p>
+            <p id="ayuda-stock-variantes" class="ayuda hidden">Con variantes, la cantidad se carga en cada una. Si una variante tiene otro precio, también se indica ahí.</p>
           </div>
 
           <!-- Nombre -->
@@ -301,6 +334,7 @@
   <script src="js/imagenes.js"></script>
   <script src="js/escaner.js"></script>
   <script src="js/tiendanube.js"></script>
+  <script src="js/sesion.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

@@ -369,7 +369,7 @@
             <label class="block"><span class="lbl">${esc(a)}</span>
               <input class="inp" data-v="${i}" data-attr="${esc(a)}" value="${esc(v.valores[a])}" placeholder="${esc(EJEMPLOS[a] || '')}"></label>`).join('')}
           ${campo(i, 'sku', 'SKU', v.sku, 'autocapitalize="characters" spellcheck="false"')}
-          ${campo(i, 'stock', 'Stock', v.stock, 'inputmode="numeric"')}
+          ${campo(i, 'stock', 'Cantidad', v.stock, 'inputmode="numeric"')}
           ${campo(i, 'precio', 'Precio <span class="opc">si cambia</span>', v.precio, 'inputmode="decimal"')}
           ${envio ? campo(i, 'peso', 'Peso kg <span class="opc">si cambia</span>', v.peso, 'inputmode="decimal"') : ''}
         </div>
@@ -402,7 +402,7 @@
     if (!d.sku) error('sku', 'Falta el SKU.');
     if (!d.categoria) error('categoria', 'Elegí una categoría.');
     if (!(TN.numero(d.precio) > 0)) error('precio', 'Falta el precio de venta.');
-    if (!d.tieneVariantes && !esStock(d.stock)) error('stock', 'Falta el stock inicial (un número entero, puede ser 0).');
+    if (!d.tieneVariantes && !esStock(d.stock)) error('stock', 'Falta la cantidad en stock (un número entero, puede ser 0).');
     if (actual.fotos.length < C.FOTOS_MINIMO) error('fotos', C.FOTOS_MINIMO === 1 ? 'Falta al menos una foto.' : `Faltan fotos: hay ${actual.fotos.length} y se necesitan al menos ${C.FOTOS_MINIMO}.`);
     if (!d.paraQue) error('paraQue', 'Contá para qué sirve el producto.');
 
@@ -421,7 +421,7 @@
           const faltan = d.atributos.filter(a => !(v.valores[a] || '').trim());
           if (faltan.length) error('variantes', `Variante ${i + 1}: falta ${faltan.join(' y ').toLowerCase()}.`);
           if (!(v.sku || '').trim()) error('variantes', `Variante ${i + 1}: falta el SKU.`);
-          if (!esStock(v.stock)) error('variantes', `Variante ${i + 1}: falta el stock (un número entero, puede ser 0).`);
+          if (!esStock(v.stock)) error('variantes', `Variante ${i + 1}: falta la cantidad (un número entero, puede ser 0).`);
           if (v.precio && !(TN.numero(v.precio) > 0)) error('variantes', `Variante ${i + 1}: el precio no es un número válido.`);
           if (v.peso && !(TN.numero(v.peso) > 0)) error('variantes', `Variante ${i + 1}: el peso no es un número válido.`);
           const combo = d.atributos.map(a => (v.valores[a] || '').trim().toLowerCase()).join('|');

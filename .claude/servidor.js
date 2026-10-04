@@ -1,8 +1,10 @@
 // Servidor local para probar: sirve el formulario y ejecuta las funciones de /api igual que Vercel.
-// Clave de carga en local: "prueba" (o la que pongas en la variable CARGA_CLAVE).
-const http = require('http'), fs = require('fs'), path = require('path');
+// Usuario de prueba en local: admin / prueba (se pueden cambiar con ADMIN_USUARIO y ADMIN_CLAVE).
+const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
 const raiz = path.join(__dirname, '..');
-process.env.CARGA_CLAVE = process.env.CARGA_CLAVE || 'prueba';
+process.env.ADMIN_USUARIO = process.env.ADMIN_USUARIO || 'admin';
+process.env.ADMIN_CLAVE = process.env.ADMIN_CLAVE || 'prueba';
+process.env.SESION_SECRETO = process.env.SESION_SECRETO || crypto.randomBytes(32).toString('hex');
 
 const tipos = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json' };
 

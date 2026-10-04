@@ -134,30 +134,31 @@ window.TN = (() => {
 
   const base = () => C.API_BASE.replace(/\/$/, '');
 
-  function clave() {
-    let k = null;
-    try { k = localStorage.getItem('clave-carga'); } catch { /* sin almacenamiento */ }
-    if (!k) {
-      k = prompt('Ingresá la clave de carga (te la pasa quien administra la tienda):');
-      if (!k) throw new Error('Falta la clave de carga.');
-      try { localStorage.setItem('clave-carga', k); } catch { /* sin almacenamiento */ }
-    }
-    return k;
-  }
-
+  // La sesión viaja sola en la cookie. Si venció, se avisa para mostrar el login.
   async function llamar(metodo, ruta, cuerpo, { signal } = {}) {
     const r = await fetch(base() + ruta, {
       method: metodo,
-      headers: { 'Content-Type': 'application/json', 'X-Clave-Carga': clave() },
+      headers: { 'Content-Type': 'application/json' },
       body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+      credentials: 'same-origin',
       signal,
     });
     const datos = await r.json().catch(() => ({}));
-    if (r.status === 401) {
-      try { localStorage.removeItem('clave-carga'); } catch { /* sin almacenamiento */ }
-    }
+    if (r.status === 401 && ruta !== '/api/login') window.dispatchEvent(new Event('sesion-vencida'));
     return { status: r.status, ok: r.ok, datos };
   }
+
+  // ---------- Sesión ----------
+  async function sesion() {
+    const r = await llamar('GET', '/api/sesion');
+    return r.ok ? r.datos : null;
+  }
+  async function ingresar(usuario, clave) {
+    const r = await llamar('POST', '/api/login', { usuario, clave });
+    if (!r.ok) throw new Error(r.datos.error || `Error ${r.status} al ingresar.`);
+    return r.datos;
+  }
+  const salir = () => llamar('POST', '/api/logout');
 
   // Qué está configurado en el servidor. Si no hay backend, todo queda en false.
   let estadoServidor = { backend: false, tiendanube: false, registro: false };
@@ -224,5 +225,5 @@ window.TN = (() => {
     }
   }
 
-  return { armarNombre, titulo, armarPayload, armarRegistro, sinEnvio, skus, numero, slug, sugerirCategoria, cargarEstado, estado, conectado, buscarCodigo, publicar };
+  return { armarNombre, titulo, armarPayload, armarRegistro, sinEnvio, skus, numero, slug, sugerirCategoria, cargarEstado, estado, conectado, buscarCodigo, publicar, sesion, ingresar, salir };
 })();

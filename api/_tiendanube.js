@@ -3,8 +3,9 @@
 //   TN_STORE_ID      número de tienda
 //   TN_ACCESS_TOKEN  token de la app instalada en la tienda (nunca va en el navegador)
 //   TN_USER_AGENT    ej.: "Carga Riegos del Sur (tu-mail@dominio.com)"
-//   CARGA_CLAVE      clave que la CM ingresa una vez en el formulario
-//   CORS_ORIGIN      opcional: dominio del formulario si está en otro sitio
+// (Usuario y sesión del administrador: ver _sesion.js)
+const { sesionActual } = require('./_sesion');
+
 const VERSION = '2025-03';
 
 async function tn(metodo, ruta, cuerpo) {
@@ -32,17 +33,19 @@ async function tn(metodo, ruta, cuerpo) {
   return datos;
 }
 
-// Valida método y clave de carga. Devuelve false si ya respondió.
-function preparar(req, res, metodo = 'POST', { sinClave = false } = {}) {
-  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Clave-Carga');
-  res.setHeader('Access-Control-Allow-Methods', `${metodo}, OPTIONS`);
+// Valida método y sesión del administrador. Devuelve false si ya respondió.
+// Sin CORS: la API solo atiende al formulario publicado en el mismo sitio.
+function preparar(req, res, metodo = 'POST', { sinSesion = false } = {}) {
   res.setHeader('Cache-Control', 'no-store');
-  if (req.method === 'OPTIONS') { res.status(204).end(); return false; }
   if (req.method !== metodo) { res.status(405).json({ error: 'Método no permitido' }); return false; }
-  if (sinClave) return true;
-  if (!process.env.CARGA_CLAVE || req.headers['x-clave-carga'] !== process.env.CARGA_CLAVE) {
-    res.status(401).json({ error: 'Clave de carga incorrecta.' });
+  if (sinSesion) return true;
+  try {
+    if (!sesionActual(req)) {
+      res.status(401).json({ error: 'La sesión venció. Volvé a ingresar.' });
+      return false;
+    }
+  } catch (e) {
+    responderError(res, e);
     return false;
   }
   return true;
