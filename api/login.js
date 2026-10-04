@@ -24,16 +24,23 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Completá usuario y contraseña.' });
     }
 
-    if (!credencialesValidas(usuario.trim(), clave)) {
+    // Se ignoran espacios de más (típico al copiar y pegar) y mayúsculas en el usuario
+    // (el teclado del celular a veces pone la primera en mayúscula).
+    if (!credencialesValidas(usuario.trim(), clave.trim())) {
       const r = intentos.get(ip) || { n: 0, desde: Date.now() };
       intentos.set(ip, { n: r.n + 1, desde: r.desde });
       await esperar(600);
-      return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+      const quedan = MAX_INTENTOS - r.n - 1;
+      return res.status(401).json({
+        error: quedan > 0
+          ? `Usuario o contraseña incorrectos. Te quedan ${quedan} ${quedan === 1 ? 'intento' : 'intentos'}.`
+          : 'Usuario o contraseña incorrectos. Por seguridad, esperá 15 minutos para volver a probar.',
+      });
     }
 
     intentos.delete(ip);
-    iniciarSesion(req, res, usuario.trim());
-    res.status(200).json({ usuario: usuario.trim() });
+    iniciarSesion(req, res, process.env.ADMIN_USUARIO);
+    res.status(200).json({ usuario: process.env.ADMIN_USUARIO });
   } catch (e) {
     responderError(res, e);
   }

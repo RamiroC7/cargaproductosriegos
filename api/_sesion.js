@@ -62,7 +62,7 @@ function credencialesValidas(usuario, clave) {
   const u = process.env.ADMIN_USUARIO, c = process.env.ADMIN_CLAVE;
   if (!u || !c) throw Object.assign(new Error('El usuario administrador no está configurado en el servidor.'), { status: 503 });
   // Se evalúan las dos comparaciones siempre, para no revelar si el usuario existe.
-  const okUsuario = iguales(usuario, u);
+  const okUsuario = iguales(String(usuario).toLowerCase(), u.toLowerCase());
   const okClave = iguales(clave, c);
   return okUsuario && okClave;
 }
