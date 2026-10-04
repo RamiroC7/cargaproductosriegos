@@ -38,7 +38,7 @@
   const ESTILOS_ESTADO = {
     escaneando: 'bg-slate-100 text-slate-700',
     buscando_info: 'bg-slate-100 text-slate-700',
-    completado_automatico: 'bg-teal-50 text-teal-900 border border-teal-200',
+    completado_automatico: 'bg-marca-50 text-marca-900 border border-marca-200',
     modo_manual: 'bg-amber-50 text-amber-900 border border-amber-200',
     guardando: 'bg-slate-100 text-slate-700',
   };
@@ -246,7 +246,7 @@
     if (r.tipo === 'encontrado') {
       const llenados = autocompletar(r.datos);
       setEstado('completado_automatico', llenados.length
-        ? 'Encontrado en el catálogo global. Completamos lo marcado en verde: revisalo y ajustá lo que haga falta.'
+        ? 'Encontrado en el catálogo global. Completamos lo marcado en azul: revisalo y ajustá lo que haga falta.'
         : 'Encontrado en el catálogo global, pero los campos ya estaban completos. No se cambió nada.');
     } else if (r.tipo === 'no_encontrado') {
       setEstado('modo_manual', 'Producto no encontrado en el catálogo global. Completalo a mano.');
@@ -308,7 +308,7 @@
     $('#fotos-grilla').innerHTML = fotos.map((f, i) => `
       <div class="relative rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square">
         <img src="${urlFoto(f)}" alt="Foto ${i + 1}" class="w-full h-full object-contain">
-        ${i === 0 ? '<span class="absolute top-1.5 left-1.5 text-[11px] font-semibold bg-teal-700 text-white px-2 py-0.5 rounded-full">Principal</span>' : ''}
+        ${i === 0 ? '<span class="absolute top-1.5 left-1.5 text-[11px] font-semibold bg-marca-700 text-white px-2 py-0.5 rounded-full">Principal</span>' : ''}
         ${f.completada ? '<span class="absolute top-1.5 right-1.5 text-[11px] bg-white/90 text-slate-600 px-1.5 py-0.5 rounded-full border border-slate-200" title="No era cuadrada: se completó con fondo blanco">Ajustada</span>' : ''}
         <div class="absolute inset-x-0 bottom-0 flex justify-between p-1.5 bg-gradient-to-t from-black/40 to-transparent">
           <button type="button" class="btn-foto" data-foto="izq" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Mover antes">←</button>
@@ -580,7 +580,7 @@
               <p class="text-sm text-slate-500 mt-0.5"><span class="font-mono">${esc(d.sku || 'sin SKU')}</span> · ${esc(d.categoria || 'sin categoría')}${precio}</p>
               <p class="text-xs text-slate-400 mt-0.5">${p.fotos.length} ${p.fotos.length === 1 ? 'foto' : 'fotos'}${variantes}${d.codigo ? ` · EAN ${esc(d.codigo)}` : ''}</p>
               ${p.tnError ? `<p class="text-xs text-red-600 mt-1">No se pudo publicar: ${esc(p.tnError)}</p>` : ''}
-              ${p.tn?.url ? `<a href="${esc(p.tn.url)}" target="_blank" rel="noopener" class="text-xs text-teal-700 underline mt-1 inline-block">Ver en la tienda</a>` : ''}
+              ${p.tn?.url ? `<a href="${esc(p.tn.url)}" target="_blank" rel="noopener" class="text-xs text-marca-700 underline mt-1 inline-block">Ver en la tienda</a>` : ''}
             </div>
           </div>
           <div class="flex flex-wrap gap-2 mt-3 sm:justify-end">

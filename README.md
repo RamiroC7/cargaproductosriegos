@@ -56,7 +56,7 @@ Si el SKU ya existe en Tiendanube, el producto no se crea de nuevo. Si se corta 
 
 - `api/codigo-barras.js` + `api/_codigos.js`: consulta el catálogo global desde el servidor (la key nunca llega al navegador), con caché de 7 días (1 día si no lo encontró) y corte a los 6 s.
 - Proveedor en `BARCODE_PROVEEDOR` (`upcitemdb` por defecto, `eansearch`, `barcodelookup`) y su key en `BARCODE_API_KEY`. upcitemdb anda sin key con un límite de 100 consultas por día.
-- Estados del formulario: `escaneando` → `buscando_info` → `completado_automatico` o `modo_manual` → `guardando`. Solo se completan campos vacíos y quedan marcados en verde.
+- Estados del formulario: `escaneando` → `buscando_info` → `completado_automatico` o `modo_manual` → `guardando`. Solo se completan campos vacíos y quedan marcados en azul.
 - **Ojo:** en las pruebas, los productos argentinos (códigos 779…) no aparecieron en upcitemdb. Para el vivero y lo artesanal la carga va a ser manual de todos modos.
 
 ## Probar en local

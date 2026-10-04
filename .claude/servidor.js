@@ -6,7 +6,7 @@ process.env.ADMIN_USUARIO = process.env.ADMIN_USUARIO || 'admin';
 process.env.ADMIN_CLAVE = process.env.ADMIN_CLAVE || 'prueba';
 process.env.SESION_SECRETO = process.env.SESION_SECRETO || crypto.randomBytes(32).toString('hex');
 
-const tipos = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json' };
+const tipos = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png' };
 
 function adaptar(res) {
   res.status = codigo => { res.statusCode = codigo; return res; };
