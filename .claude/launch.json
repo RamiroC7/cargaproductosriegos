@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "carga-productos", "runtimeExecutable": "node", "runtimeArgs": [".claude/servidor.js"], "port": 5173 }
+  ]
+}
