@@ -78,6 +78,14 @@ Cuando el código no está en ningún catálogo, la empleada saca una foto de la
 - En el plan gratis Google puede usar las fotos enviadas para mejorar sus productos. Solo viajan fotos de envases y etiquetas.
 - Si no hay key cargada, el botón no aparece.
 
+## Respaldo en la nube
+
+Cada producto que se guarda en el celular se copia solo a **Vercel Blob** (store privado `riegos-respaldo`, región São Paulo), aunque todavía no se haya publicado. Si se pierde el celular o se borran los datos del navegador: **Cargados → Recuperar del respaldo**.
+
+- Un archivo por producto (`productos/<id>.json`) con datos y fotos (1600 px). Al publicarse en Tiendanube se reemplaza por una versión sin fotos, para ocupar poco.
+- Lo que no se pudo copiar (sin conexión) se reintenta cada minuto y al volver la conexión. Cada producto muestra "respaldado ✓" o "respaldo pendiente".
+- Plan Hobby de Vercel: 1 GB y 2.000 escrituras por mes gratis. Si se pasa, no cobra: el respaldo se pausa 30 días (Vercel avisa por mail antes).
+
 ## Probar en local
 
 ```

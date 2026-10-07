@@ -2,6 +2,7 @@
 const { preparar } = require('./_tiendanube');
 const { registroConfigurado } = require('./_registro');
 const { iaConfigurada } = require('./_ia');
+const { respaldoConfigurado } = require('./_respaldo');
 
 module.exports = (req, res) => {
   if (!preparar(req, res, 'GET', { sinSesion: true })) return;
@@ -10,5 +11,6 @@ module.exports = (req, res) => {
     codigos: process.env.BARCODE_PROVEEDOR || 'upcitemdb,openfacts',
     registro: registroConfigurado(),
     ia: iaConfigurada(),
+    respaldo: respaldoConfigurado(),
   });
 };

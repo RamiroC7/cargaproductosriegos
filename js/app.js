@@ -571,6 +571,7 @@
     p.actualizado = Date.now();
     await DB.guardar(p);
     await actualizarContador();
+    Respaldo.sincronizar(); // copia en la nube, en segundo plano
   }
 
   async function guardarBorrador() {
@@ -714,7 +715,7 @@
                 <span class="shrink-0 text-xs font-medium rounded-full px-2 py-0.5 ${color}">${estado}</span>
               </div>
               <p class="text-sm text-slate-500 mt-0.5"><span class="font-mono">${esc(d.sku || 'sin SKU')}</span> · ${esc(d.categoria || 'sin categoría')}${precio}</p>
-              <p class="text-xs text-slate-400 mt-0.5">${fotosTienda.length} ${fotosTienda.length === 1 ? 'foto' : 'fotos'}${variantes}${d.codigo ? ` · EAN ${esc(d.codigo)}` : ''}</p>
+              <p class="text-xs text-slate-400 mt-0.5">${fotosTienda.length} ${fotosTienda.length === 1 ? 'foto' : 'fotos'}${variantes}${d.codigo ? ` · EAN ${esc(d.codigo)}` : ''}${Respaldo.disponible() ? (Respaldo.pendiente(p) ? ' · <span class="text-amber-700">respaldo pendiente</span>' : ' · <span class="text-green-700">respaldado ✓</span>') : ''}</p>
               ${p.tnError ? `<p class="text-xs text-red-600 mt-1">No se pudo publicar: ${esc(p.tnError)}</p>` : ''}
               ${p.tn?.url ? `<a href="${esc(p.tn.url)}" target="_blank" rel="noopener" class="text-xs text-marca-700 underline mt-1 inline-block">Ver en la tienda</a>` : ''}
             </div>
@@ -743,6 +744,7 @@
     } else if (accion === 'borrar') {
       const extra = p.estado === 'publicado' ? '\n\nSolo se borra de esta lista: en Tiendanube sigue publicado.' : '';
       if (!confirm(`¿Borrar "${TN.titulo(p.datos) || 'este producto'}"?${extra}`)) return;
+      await Respaldo.marcarBorrado(p).catch(() => {});
       await DB.borrar(p.id);
       if (actual?.id === p.id) cargarEnForm(vacio());
       await actualizarContador();
@@ -782,6 +784,40 @@
 
   // ---------- Inicio ----------
   cargarEnForm(vacio());
-  TN.cargarEstado().then(() => renderFotos());
+  TN.cargarEstado().then(() => { renderFotos(); Respaldo.sincronizar(); });
+
+  // ---------- Respaldo en la nube ----------
+  // Reintenta lo pendiente cada minuto y al recuperar la conexión.
+  setInterval(() => Respaldo.sincronizar(), 60000);
+  window.addEventListener('online', () => Respaldo.sincronizar());
+
+  let avisoRespaldoMostrado = false;
+  window.addEventListener('respaldo-actualizado', e => {
+    const { pendientes, error } = e.detail;
+    const caja = $('#aviso-respaldo');
+    caja.classList.toggle('hidden', !pendientes);
+    if (pendientes) caja.querySelector('span').textContent = `${pendientes} ${pendientes === 1 ? 'producto todavía no se copió' : 'productos todavía no se copiaron'} a la nube${error ? ` (${error.message})` : ''}. Se reintenta solo cada minuto; no borres los datos del navegador hasta que diga "respaldado".`;
+    if (error?.status === 507 && !avisoRespaldoMostrado) { avisoRespaldoMostrado = true; aviso(error.message, 'error'); }
+    if (!$('#vista-lista').classList.contains('hidden')) renderLista();
+  });
+
+  $('#btn-recuperar').addEventListener('click', async () => {
+    if (!Respaldo.disponible()) { aviso('El respaldo no está disponible ahora. Revisá la conexión.', 'error'); return; }
+    if (!confirm('¿Traer a este celular los productos guardados en la nube que no están acá? No se borra ni se reemplaza nada.')) return;
+    const b = $('#btn-recuperar');
+    const texto = b.textContent;
+    b.disabled = true;
+    try {
+      const r = await Respaldo.recuperar(t => { b.textContent = t; });
+      aviso(r.recuperados ? `Se recuperaron ${r.recuperados} ${r.recuperados === 1 ? 'producto' : 'productos'} ✓` : 'Este celular ya tiene todo lo que está en el respaldo.');
+      await actualizarContador();
+      renderLista();
+    } catch (e) {
+      aviso(`No se pudo recuperar: ${e.message}`, 'error');
+    } finally {
+      b.disabled = false;
+      b.textContent = texto;
+    }
+  });
   actualizarContador().catch(() => aviso('Este navegador no permite guardar datos. Probá con Chrome o Safari actualizados.', 'error'));
 })();

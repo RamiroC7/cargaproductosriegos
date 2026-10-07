@@ -336,10 +336,14 @@
     <section id="vista-lista" class="hidden">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 class="text-xl sm:text-2xl font-semibold text-slate-900">Productos cargados</h1>
-        <div class="flex gap-2">
-          <button type="button" id="btn-exportar" class="btn-secundario">Descargar respaldo</button>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="btn-recuperar" class="btn-secundario">Recuperar del respaldo</button>
+          <button type="button" id="btn-exportar" class="btn-secundario">Descargar copia</button>
           <button type="button" id="btn-ir-cargar" class="btn-primario">+ Nuevo</button>
         </div>
+      </div>
+      <div id="aviso-respaldo" class="hidden mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <b>Respaldo pendiente:</b> <span></span>
       </div>
       <div id="aviso-api" class="hidden mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         <b>Todavía no está conectada a Tiendanube.</b> Los productos quedan guardados en este celular. Cuando se conecte, se publican desde acá con el botón <b>Publicar</b>. No borres los datos del navegador mientras tanto.
@@ -366,6 +370,7 @@
   <script src="js/imagenes.js"></script>
   <script src="js/escaner.js"></script>
   <script src="js/tiendanube.js"></script>
+  <script src="js/respaldo.js"></script>
   <script src="js/sesion.js"></script>
   <script src="js/app.js"></script>
 </body>
