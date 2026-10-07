@@ -52,17 +52,17 @@ La sesión dura 12 horas y se guarda en una cookie `HttpOnly` (el JavaScript de 
 
 ## Conectarlo con Tiendanube
 
-1. En el [Portal de Partners](https://partners.tiendanube.com) creá una app:
-   - Permisos: **Productos → escritura** (`write_products`).
-   - URL de redirección: `https://carga-productos-riegos.vercel.app/api/tiendanube-callback`
-2. Cargá en Vercel el ID y el secreto de la app: `TN_APP_ID` y `TN_CLIENT_SECRET` (`--sensitive`). Volvé a publicar.
-3. En la app, entrá a **Cargados → Conectar con Tiendanube** y aceptá en Tiendanube. La página de vuelta muestra el número de tienda y la clave de acceso.
-4. Cargalos en Vercel como `TN_STORE_ID` y `TN_ACCESS_TOKEN` (`--sensitive`) y volvé a publicar.
+Se usa una **aplicación a medida** de la propia tienda (no hace falta el Portal de Partners):
 
-`TN_USER_AGENT` ya está cargado. La clave de acceso no vence; deja de valer solo si se desinstala la app o se vuelve a conectar.
+1. Admin de Tiendanube → **Aplicaciones a medida** → **Crear aplicación a medida**. Nombre: "Carga de productos". Perfil de acceso: solo **Productos** (lectura y escritura).
+2. Guardar, abrir la app y tocar **Revelar** para ver el token (se muestra una sola vez).
+3. Cargarlo en Vercel: `npx vercel env add TN_ACCESS_TOKEN production --sensitive`.
+4. Cargar el número de tienda: `npx vercel env add TN_STORE_ID production` (aparece en el código de la página de la tienda como `LS.store.id`).
+5. Volver a publicar: `npx vercel deploy --prod`.
 
-Si el SKU ya existe en Tiendanube, el producto no se crea de nuevo. Si se corta a mitad, al reintentar sigue desde la última foto subida.
+`TN_USER_AGENT` ya está cargado. El token no vence; deja de valer si se borra la aplicación a medida.
 
+Alternativa (app de Partners con OAuth): los endpoints `/api/tiendanube-conectar` y `/api/tiendanube-callback` siguen disponibles con `TN_APP_ID` y `TN_CLIENT_SECRET`.
 ## Código de barras
 
 - `api/codigo-barras.js` + `api/_codigos.js`: consulta el catálogo global desde el servidor (la key nunca llega al navegador), con caché de 7 días (1 día si no lo encontró) y corte a los 6 s.
