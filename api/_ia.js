@@ -9,7 +9,10 @@
 // Acá solo viajan fotos de envases y etiquetas, no datos de clientes.
 
 const MODELO = () => process.env.GEMINI_MODELO || 'gemini-3.8-flash';
-const TIMEOUT_MS = 25000;
+// Si el modelo principal está saturado, se prueba con estos (también gratis), en orden.
+const RESPALDOS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const TIMEOUT_MS = 20000;
+const esperar = ms => new Promise(r => setTimeout(r, ms));
 
 const iaConfigurada = () => !!process.env.GEMINI_API_KEY;
 
@@ -49,34 +52,48 @@ function esquema() {
 async function leerProducto({ imagenes, codigo, categorias }) {
   if (!iaConfigurada()) throw Object.assign(new Error('La IA todavía no está configurada en el servidor.'), { status: 503 });
 
-  let r;
-  try {
-    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODELO())}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: instrucciones(categorias, codigo) },
-            ...imagenes.map(data => ({ inline_data: { mime_type: 'image/jpeg', data } })),
-          ],
-        }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: esquema(), temperature: 0.2 },
-      }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (e) {
-    if (e.name === 'TimeoutError') throw Object.assign(new Error('La IA tardó demasiado. Probá de nuevo.'), { status: 504 });
-    throw Object.assign(new Error('No se pudo conectar con la IA.'), { status: 502 });
+  const cuerpo = JSON.stringify({
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: instrucciones(categorias, codigo) },
+        ...imagenes.map(data => ({ inline_data: { mime_type: 'image/jpeg', data } })),
+      ],
+    }],
+    generationConfig: { responseMimeType: 'application/json', responseSchema: esquema(), temperature: 0.2 },
+  });
+
+  // Saturado (503/500), límite del modelo (429) o demora: se pasa al siguiente modelo.
+  // Cualquier otro error (key inválida, pedido mal armado) corta en el acto.
+  const modelos = [...new Set([MODELO(), ...RESPALDOS])];
+  let datos = null, modeloUsado = null, ultimo = null;
+  for (const [i, modelo] of modelos.entries()) {
+    if (i > 0) await esperar(800);
+    let r;
+    try {
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+        body: cuerpo,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (e) {
+      ultimo = e.name === 'TimeoutError' ? { status: 504, motivo: 'tardó demasiado' } : { status: 502, motivo: 'no se pudo conectar' };
+      continue;
+    }
+    const json = await r.json().catch(() => ({}));
+    if (r.ok) { datos = json; modeloUsado = modelo; break; }
+    ultimo = { status: r.status, motivo: json?.error?.message || `error ${r.status}` };
+    if (![429, 500, 503].includes(r.status)) {
+      throw Object.assign(new Error(`La IA respondió ${r.status}: ${ultimo.motivo}`), { status: 502 });
+    }
   }
 
-  const datos = await r.json().catch(() => ({}));
-  if (r.status === 429) {
-    throw Object.assign(new Error('Se alcanzó el límite de uso gratis de la IA. Esperá un minuto (o hasta mañana si es el límite diario) y probá de nuevo.'), { status: 429 });
-  }
-  if (!r.ok) {
-    throw Object.assign(new Error(`La IA respondió ${r.status}: ${datos?.error?.message || 'error desconocido'}`), { status: 502 });
+  if (!datos) {
+    if (ultimo?.status === 429) {
+      throw Object.assign(new Error('Se alcanzó el límite de uso gratis de la IA. Esperá un minuto (o hasta mañana si es el límite diario) y probá de nuevo.'), { status: 429 });
+    }
+    throw Object.assign(new Error('La IA de Google está saturada en este momento. Probá de nuevo en unos minutos o completá los datos a mano.'), { status: 503 });
   }
 
   const candidato = datos.candidates?.[0];
@@ -105,7 +122,7 @@ async function leerProducto({ imagenes, codigo, categorias }) {
     categoria: categorias.includes(limpiar(campos.categoria)) ? limpiar(campos.categoria) : '',
     paraQue: limpiar(campos.paraQue), especificaciones: listar(campos.especificaciones),
     modoUso: limpiar(campos.modoUso), incluye: listar(campos.incluye),
-    modelo_ia: MODELO(),
+    modelo_ia: modeloUsado,
   };
 }
 
