@@ -16,7 +16,10 @@ window.Imagenes = (() => {
     });
   }
 
-  async function procesar(archivo) {
+  async function procesar(archivo, { soloIA = false } = {}) {
+    // Las fotos solo para la IA no se publican: no hace falta que sean cuadradas ni grandes.
+    if (soloIA) return { blob: await achicar(archivo, 1600), cuadrada: true };
+
     const img = await cargar(archivo);
     const ancho = img.width, alto = img.height;
     const lado = Math.max(ancho, alto);
@@ -50,16 +53,19 @@ window.Imagenes = (() => {
     });
   }
 
-  // Copia achicada (JPG, base64) para mandar a la IA: más rápido y dentro de los límites del servidor.
-  async function reducir(blob, lado = 1024) {
+  // Copia achicada en JPG, sin cambiar la proporción.
+  async function achicar(blob, lado) {
     const img = await cargar(blob);
     const escala = Math.min(1, lado / Math.max(img.width, img.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(img.width * escala);
     canvas.height = Math.round(img.height * escala);
     canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    return aBase64(await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85)));
+    return new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
   }
+
+  // Para mandar a la IA: más rápido y dentro de los límites del servidor.
+  const reducir = async (blob, lado = 1024) => aBase64(await achicar(blob, lado));
 
   return { procesar, aBase64, reducir };
 })();

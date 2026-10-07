@@ -213,13 +213,15 @@ window.TN = (() => {
       p.tn.url = r.url || null;
     }
 
-    for (let i = p.tn.imagenes; i < p.fotos.length; i++) {
-      progreso(`Subiendo foto ${i + 1} de ${p.fotos.length}…`);
+    // Las fotos marcadas "solo IA" (etiquetas, códigos) nunca se suben a la tienda.
+    const fotos = p.fotos.filter(f => !f.soloIA);
+    for (let i = p.tn.imagenes; i < fotos.length; i++) {
+      progreso(`Subiendo foto ${i + 1} de ${fotos.length}…`);
       const img = await exigir('POST', '/api/imagenes', {
         product_id: p.tn.id,
         position: i + 1,
         filename: `${slug(p.datos.sku) || 'producto'}-${i + 1}.jpg`,
-        attachment: await Imagenes.aBase64(p.fotos[i].blob),
+        attachment: await Imagenes.aBase64(fotos[i].blob),
       });
       p.tn.imagenesUrls = [...(p.tn.imagenesUrls || []), img.src];
       p.tn.imagenes = i + 1;

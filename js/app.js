@@ -238,7 +238,8 @@
   }
 
   $('#btn-ia').addEventListener('click', async () => {
-    const fotos = actual.fotos.slice(0, 4);
+    // Primero las de etiqueta (solo IA), que son las que tienen más datos.
+    const fotos = [...actual.fotos.filter(f => f.soloIA), ...publicables(actual.fotos)].slice(0, 4);
     if (!fotos.length) return;
     const boton = $('#btn-ia');
     const contenido = boton.innerHTML;
@@ -327,36 +328,45 @@
     return urlsFotos.get(f.id);
   }
 
-  async function agregarFotos(archivos) {
+  // Fotos que van a la tienda (las "solo IA" se leen pero no se publican).
+  const publicables = fotos => fotos.filter(f => !f.soloIA);
+
+  async function agregarFotos(archivos, soloIA = false) {
     if (!archivos.length) return;
     $('#fotos-procesando').classList.remove('hidden');
     const errores = [];
     for (const archivo of archivos) {
       try {
-        const r = await Imagenes.procesar(archivo);
-        actual.fotos.push({ id: nuevoId(), blob: r.blob, completada: !r.cuadrada });
+        const r = await Imagenes.procesar(archivo, { soloIA });
+        actual.fotos.push({ id: nuevoId(), blob: r.blob, completada: !r.cuadrada, soloIA });
       } catch (e) {
         errores.push(e.message);
       }
     }
     $('#fotos-procesando').classList.add('hidden');
     renderFotos();
-    if (actual.fotos.length >= C.FOTOS_MINIMO) $('[data-campo=fotos]').classList.remove('con-error');
+    if (publicables(actual.fotos).length >= C.FOTOS_MINIMO) $('[data-campo=fotos]').classList.remove('con-error');
     if (errores.length) aviso(errores.join('\n'), 'error');
   }
 
   $$('input[data-fotos]').forEach(input => input.addEventListener('change', async () => {
-    await agregarFotos([...input.files]);
+    await agregarFotos([...input.files], input.hasAttribute('data-solo-ia'));
     input.value = '';
   }));
 
   function renderFotos() {
     const fotos = actual.fotos;
+    const principal = fotos.find(f => !f.soloIA);
     $('#fotos-grilla').innerHTML = fotos.map((f, i) => `
-      <div class="relative rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square">
-        <img src="${urlFoto(f)}" alt="Foto ${i + 1}" class="w-full h-full object-contain">
-        ${i === 0 ? '<span class="absolute top-1.5 left-1.5 text-[11px] font-semibold bg-marca-700 text-white px-2 py-0.5 rounded-full">Principal</span>' : ''}
+      <div class="relative rounded-xl overflow-hidden border ${f.soloIA ? 'border-dashed border-marca-300' : 'border-slate-200'} bg-white aspect-square">
+        <img src="${urlFoto(f)}" alt="Foto ${i + 1}" class="w-full h-full object-contain ${f.soloIA ? 'opacity-60' : ''}">
+        ${f === principal ? '<span class="absolute top-1.5 left-1.5 text-[11px] font-semibold bg-marca-700 text-white px-2 py-0.5 rounded-full">Principal</span>' : ''}
         ${f.completada ? '<span class="absolute top-1.5 right-1.5 text-[11px] bg-white/90 text-slate-600 px-1.5 py-0.5 rounded-full border border-slate-200" title="No era cuadrada: se completó con fondo blanco">Ajustada</span>' : ''}
+        <button type="button" data-foto="ia" data-i="${i}"
+          class="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] font-semibold px-2 py-1 rounded-full shadow ${f.soloIA ? 'bg-marca-700 text-white' : 'bg-white/90 text-slate-700 border border-slate-200'}"
+          aria-pressed="${f.soloIA}" title="${f.soloIA ? 'Esta foto no se publica: tocá para publicarla' : 'Tocá para que no se publique (solo la lee la IA)'}">
+          ${f.soloIA ? 'Solo IA' : 'Se publica'}
+        </button>
         <div class="absolute inset-x-0 bottom-0 flex justify-between p-1.5 bg-gradient-to-t from-black/40 to-transparent">
           <button type="button" class="btn-foto" data-foto="izq" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Mover antes">←</button>
           <button type="button" class="btn-foto text-red-600" data-foto="quitar" data-i="${i}" aria-label="Quitar foto">✕</button>
@@ -364,14 +374,17 @@
         </div>
       </div>`).join('');
 
-    const n = fotos.length, ok = n >= C.FOTOS_MINIMO;
+    const n = publicables(fotos).length, ok = n >= C.FOTOS_MINIMO;
+    const soloIA = fotos.length - n;
     const contador = $('#fotos-contador');
-    contador.textContent = ok ? `${n} ${n === 1 ? 'foto' : 'fotos'} ✓` : `${n} de ${C.FOTOS_MINIMO} mínimo`;
+    contador.textContent = (ok ? `${n} ${n === 1 ? 'foto' : 'fotos'} ✓` : `${n} de ${C.FOTOS_MINIMO} mínimo`) + (soloIA ? ` · ${soloIA} solo IA` : '');
     contador.className = `shrink-0 text-xs font-medium rounded-full px-2.5 py-1 ${ok ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`;
-    $('#ia-panel').classList.toggle('hidden', !(TN.estado().ia && n > 0 && actual.estado !== 'publicado'));
+    const conIA = TN.estado().ia && actual.estado !== 'publicado';
+    $('#ia-panel').classList.toggle('hidden', !(conIA && fotos.length > 0));
+    $('#btn-foto-ia').classList.toggle('hidden', !conIA);
   }
 
-  $('#fotos-grilla').addEventListener('click', e => {
+  $('#fotos-grilla').addEventListener('click', async e => {
     const b = e.target.closest('[data-foto]');
     if (!b) return;
     const i = Number(b.dataset.i), fotos = actual.fotos;
@@ -379,6 +392,21 @@
       const [f] = fotos.splice(i, 1);
       URL.revokeObjectURL(urlsFotos.get(f.id));
       urlsFotos.delete(f.id);
+    } else if (b.dataset.foto === 'ia') {
+      const f = fotos[i];
+      if (!f.soloIA) {
+        f.soloIA = true;
+      } else {
+        // Para publicarla tiene que cumplir lo mismo que las demás: cuadrada y de buen tamaño.
+        try {
+          const r = await Imagenes.procesar(new File([f.blob], `foto-${i + 1}.jpg`, { type: f.blob.type }));
+          URL.revokeObjectURL(urlsFotos.get(f.id));
+          urlsFotos.delete(f.id);
+          Object.assign(f, { blob: r.blob, completada: !r.cuadrada, soloIA: false });
+        } catch (err) {
+          aviso(`Esta foto no se puede publicar: ${err.message}`, 'error');
+        }
+      }
     } else {
       const j = b.dataset.foto === 'izq' ? i - 1 : i + 1;
       [fotos[i], fotos[j]] = [fotos[j], fotos[i]];
@@ -451,7 +479,8 @@
     if (!d.categoria) error('categoria', 'Elegí una categoría.');
     if (!(TN.numero(d.precio) > 0)) error('precio', 'Falta el precio de venta.');
     if (!d.tieneVariantes && !esStock(d.stock)) error('stock', 'Falta la cantidad en stock (un número entero, puede ser 0).');
-    if (actual.fotos.length < C.FOTOS_MINIMO) error('fotos', C.FOTOS_MINIMO === 1 ? 'Falta al menos una foto.' : `Faltan fotos: hay ${actual.fotos.length} y se necesitan al menos ${C.FOTOS_MINIMO}.`);
+    const nFotos = publicables(actual.fotos).length;
+    if (nFotos < C.FOTOS_MINIMO) error('fotos', C.FOTOS_MINIMO === 1 ? 'Falta al menos una foto para publicar (las "Solo IA" no cuentan).' : `Faltan fotos: hay ${nFotos} para publicar y se necesitan al menos ${C.FOTOS_MINIMO}.`);
     if (!d.paraQue) error('paraQue', 'Contá para qué sirve el producto.');
 
     if (!TN.sinEnvio(d)) {
@@ -609,8 +638,9 @@
       const d = p.datos;
       const [estado, color] = ESTADOS[p.estado];
       let miniatura = '<div class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl bg-slate-100"></div>';
-      if (p.fotos[0]) {
-        const url = URL.createObjectURL(p.fotos[0].blob);
+      const fotosTienda = publicables(p.fotos);
+      if (fotosTienda[0]) {
+        const url = URL.createObjectURL(fotosTienda[0].blob);
         urlsLista.push(url);
         miniatura = `<img src="${url}" alt="" class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl border border-slate-200 object-contain bg-white">`;
       }
@@ -626,7 +656,7 @@
                 <span class="shrink-0 text-xs font-medium rounded-full px-2 py-0.5 ${color}">${estado}</span>
               </div>
               <p class="text-sm text-slate-500 mt-0.5"><span class="font-mono">${esc(d.sku || 'sin SKU')}</span> · ${esc(d.categoria || 'sin categoría')}${precio}</p>
-              <p class="text-xs text-slate-400 mt-0.5">${p.fotos.length} ${p.fotos.length === 1 ? 'foto' : 'fotos'}${variantes}${d.codigo ? ` · EAN ${esc(d.codigo)}` : ''}</p>
+              <p class="text-xs text-slate-400 mt-0.5">${fotosTienda.length} ${fotosTienda.length === 1 ? 'foto' : 'fotos'}${variantes}${d.codigo ? ` · EAN ${esc(d.codigo)}` : ''}</p>
               ${p.tnError ? `<p class="text-xs text-red-600 mt-1">No se pudo publicar: ${esc(p.tnError)}</p>` : ''}
               ${p.tn?.url ? `<a href="${esc(p.tn.url)}" target="_blank" rel="noopener" class="text-xs text-marca-700 underline mt-1 inline-block">Ver en la tienda</a>` : ''}
             </div>
