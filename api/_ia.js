@@ -3,6 +3,7 @@
 //
 // Variables de entorno (todas opcionales; con una alcanza):
 //   GEMINI_API_KEY     Google AI Studio (gratis con límites). Modelo: GEMINI_MODELO (def. 'gemini-3.8-flash').
+//   MISTRAL_API_KEY    Mistral (plan Experiment gratis, sin tarjeta). Modelo: MISTRAL_MODELO (def. 'mistral-small-latest').
 //   OPENAI_API_KEY     ChatGPT (OpenAI, pago).        Modelo: OPENAI_MODELO (def. 'gpt-6-luna').
 //   XAI_API_KEY        Grok (xAI, pago).              Modelo: XAI_MODELO    (def. 'grok-4.7').
 //   ANTHROPIC_API_KEY  Claude (Anthropic, pago).      Modelo: CLAUDE_MODELO (def. 'claude-opus-5-5').
@@ -20,7 +21,8 @@ const TIMEOUT_MS = 45000; // tope por IA
 const ESCALON_MS = 6000;  // si una IA no respondió en este tiempo, arranca la siguiente en paralelo
 
 const env = (nombre, porDefecto) => process.env[nombre] || porDefecto;
-const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
+const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.MISTRAL_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
+const esGratis = nombre => nombre.startsWith('gemini') || nombre.startsWith('mistral') || nombre.startsWith('ministral');
 
 function instrucciones(categorias, codigo) {
   return `Sos asistente de carga de productos de "Riegos del Sur", un comercio argentino de piletas, riego, jardín, vivero, herramientas y muebles de exterior.
@@ -124,6 +126,39 @@ function compatibleOpenAI(nombre, url, key, modelo) {
   };
 }
 
+// Mistral: parecido a OpenAI, pero la imagen va como texto (data URL) y no como objeto.
+function mistral(modelo) {
+  return {
+    nombre: modelo,
+    async pedir({ prompt, imagenes, signal }) {
+      const llamar = formato => fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.MISTRAL_API_KEY}` },
+        body: JSON.stringify({
+          model: modelo,
+          temperature: 0.2,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              ...imagenes.map(data => ({ type: 'image_url', image_url: `data:image/jpeg;base64,${data}` })),
+            ],
+          }],
+          response_format: formato,
+        }),
+        signal,
+      });
+      let r = await llamar({ type: 'json_schema', json_schema: { name: 'producto', strict: true, schema: esquemaJson() } });
+      let json = await leerJson(r);
+      // Si no acepta el esquema junto con imágenes, se pide JSON simple (el prompt ya dice qué campos van).
+      if (r.status === 400) { r = await llamar({ type: 'json_object' }); json = await leerJson(r); }
+      if (!r.ok) return { status: r.status, motivo: json?.message || json?.error?.message || json?.detail };
+      const texto = json.choices?.[0]?.message?.content;
+      return texto ? { status: 200, texto } : { status: 502, motivo: 'sin datos' };
+    },
+  };
+}
+
 function claude(modelo) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   return {
@@ -163,6 +198,7 @@ function candidatas() {
   const lista = [];
   const geminiPrincipal = env('GEMINI_MODELO', 'gemini-3.8-flash');
   if (process.env.GEMINI_API_KEY) lista.push(gemini(geminiPrincipal), gemini('gemini-3.6-flash'));
+  if (process.env.MISTRAL_API_KEY) lista.push(mistral(env('MISTRAL_MODELO', 'mistral-small-latest')));
   if (process.env.OPENAI_API_KEY) lista.push(compatibleOpenAI(env('OPENAI_MODELO', 'gpt-6-luna'), 'https://api.openai.com/v1/chat/completions', process.env.OPENAI_API_KEY, env('OPENAI_MODELO', 'gpt-6-luna')));
   if (process.env.XAI_API_KEY) lista.push(compatibleOpenAI(env('XAI_MODELO', 'grok-4.7'), 'https://api.x.ai/v1/chat/completions', process.env.XAI_API_KEY, env('XAI_MODELO', 'grok-4.7')));
   if (process.env.ANTHROPIC_API_KEY) lista.push(claude(env('CLAUDE_MODELO', 'claude-opus-5-5')));
@@ -178,60 +214,74 @@ async function leerProducto({ imagenes, codigo, categorias }) {
   const prompt = instrucciones(categorias, codigo);
   const ias = candidatas();
   const intentos = []; // queda en los registros de Vercel para saber qué pasó con cada IA
-  const controles = [];
-  let resuelto = false;
+  const inicio = Date.now();
 
-  async function intentar(ia) {
-    const control = new AbortController();
-    controles.push(control);
-    const reloj = setTimeout(() => control.abort(), TIMEOUT_MS);
-    const t0 = Date.now();
-    let r;
-    try {
-      r = await ia.pedir({ prompt, imagenes, signal: control.signal });
-    } catch {
-      // Cortada por demora, porque otra IA ya respondió, o sin conexión.
-      r = resuelto ? { status: 0 } : { status: control.signal.aborted ? 504 : 502, motivo: control.signal.aborted ? 'tardó demasiado' : 'no se pudo conectar' };
-    } finally {
-      clearTimeout(reloj);
+  // Una "ronda": las IAs de la lista compiten y gana la primera respuesta buena (null si ninguna).
+  function ronda(lista, numero) {
+    const controles = [];
+    let resuelto = false;
+
+    async function intentar(ia) {
+      const control = new AbortController();
+      controles.push(control);
+      const reloj = setTimeout(() => control.abort(), TIMEOUT_MS);
+      const t0 = Date.now();
+      let r;
+      try {
+        r = await ia.pedir({ prompt, imagenes, signal: control.signal });
+      } catch {
+        // Cortada por demora, porque otra IA ya respondió, o sin conexión.
+        r = resuelto ? { status: 0 } : { status: control.signal.aborted ? 504 : 502, motivo: control.signal.aborted ? 'tardó demasiado' : 'no se pudo conectar' };
+      } finally {
+        clearTimeout(reloj);
+      }
+      if (r.status !== 0) intentos.push({ ronda: numero, ia: ia.nombre, status: r.status, ms: Date.now() - t0, motivo: r.status === 200 ? 'ok' : String(r.motivo || '').slice(0, 160) });
+      return { ...r, ia: ia.nombre };
     }
-    if (r.status !== 0) intentos.push({ ia: ia.nombre, status: r.status, ms: Date.now() - t0, motivo: r.status === 200 ? 'ok' : String(r.motivo || '').slice(0, 160) });
-    return { ...r, ia: ia.nombre };
+
+    return new Promise(resolver => {
+      let lanzadas = 0, terminadas = 0;
+      const terminar = valor => {
+        if (resuelto) return;
+        resuelto = true;
+        clearInterval(escalonado);
+        controles.forEach(c => c.abort());
+        resolver(valor);
+      };
+      const lanzar = () => {
+        if (resuelto || lanzadas >= lista.length) return;
+        const ia = lista[lanzadas++];
+        intentar(ia).then(r => {
+          terminadas++;
+          if (r.status === 200) return terminar(r);
+          if (lanzadas < lista.length) lanzar();
+          else if (terminadas >= lanzadas) terminar(null);
+        });
+      };
+      const escalonado = setInterval(lanzar, ESCALON_MS);
+      lanzar();
+    });
   }
 
-  const ganador = await new Promise(resolver => {
-    let lanzadas = 0, terminadas = 0;
-    const terminar = valor => {
-      if (resuelto) return;
-      resuelto = true;
-      clearInterval(escalonado);
-      controles.forEach(c => c.abort());
-      resolver(valor);
-    };
-    const lanzar = () => {
-      if (resuelto || lanzadas >= ias.length) return;
-      const ia = ias[lanzadas++];
-      intentar(ia).then(r => {
-        terminadas++;
-        if (r.status === 200) return terminar(r);
-        if (lanzadas < ias.length) lanzar();
-        else if (terminadas >= lanzadas) terminar(null);
-      });
-    };
-    const escalonado = setInterval(lanzar, ESCALON_MS);
-    lanzar();
-  });
+  let ganador = await ronda(ias, 1);
+  // La saturación de las IAs gratis suele durar segundos: si todas dijeron "saturada" rápido,
+  // se espera un poco y se prueba de nuevo solo con las gratis.
+  if (!ganador && Date.now() - inicio < 30000 && intentos.some(x => x.status === 503 || x.status === 500)) {
+    await new Promise(r => setTimeout(r, 4000));
+    ganador = await ronda(ias.filter(x => esGratis(x.nombre)), 2);
+  }
   console.log('IA intentos', JSON.stringify(intentos));
 
   if (!ganador) {
-    const hayPagas = ias.some(x => !x.nombre.startsWith('gemini'));
+    const hayPagas = ias.some(x => !esGratis(x.nombre));
+    const soloGoogle = ias.every(x => x.nombre.startsWith('gemini'));
     if (!hayPagas && intentos.some(x => x.status === 429)) {
       throw Object.assign(new Error('Se alcanzó el límite de uso gratis de la IA. Esperá un minuto (o hasta mañana si es el límite diario) y probá de nuevo.'), { status: 429 });
     }
     if (intentos.length && intentos.every(x => x.status === 504)) {
       throw Object.assign(new Error('La IA tardó demasiado en responder. Probá con menos fotos o de nuevo en unos minutos.'), { status: 504 });
     }
-    if (!hayPagas) {
+    if (soloGoogle) {
       throw Object.assign(new Error('La IA de Google está saturada en este momento. Probá de nuevo en unos minutos o completá los datos a mano.'), { status: 503 });
     }
     throw Object.assign(new Error('Ninguna IA pudo leer las fotos en este momento. Probá de nuevo en unos minutos o completá los datos a mano.'), { status: 503 });
