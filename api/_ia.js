@@ -15,8 +15,8 @@ const iaConfigurada = () => !!process.env.GEMINI_API_KEY;
 
 function instrucciones(categorias, codigo) {
   return `Sos asistente de carga de productos de "Riegos del Sur", un comercio argentino de piletas, riego, jardín, vivero, herramientas y muebles de exterior.
-Te paso la foto de un producto (envase, etiqueta o el producto en sí)${codigo ? ` cuyo código de barras es ${codigo}` : ''}.
-Extraé los datos para la ficha de la tienda online, en español rioplatense neutro.
+Te paso una o varias fotos del MISMO producto (frente, dorso, etiqueta, caja o el producto en sí)${codigo ? `, cuyo código de barras es ${codigo}` : ''}.
+Combiná lo que se lee en todas las fotos y extraé los datos para la ficha de la tienda online, en español rioplatense neutro.
 
 Reglas:
 - Usá solo lo que se ve en la foto o lo que es evidente del producto. No inventes marcas, modelos, medidas ni especificaciones: si algo no se lee, dejalo como texto vacío o lista vacía.
@@ -41,7 +41,8 @@ function esquema() {
   };
 }
 
-async function leerProducto({ imagenBase64, mimeType = 'image/jpeg', codigo, categorias }) {
+// imagenes: lista de fotos en base64 (JPG) del mismo producto.
+async function leerProducto({ imagenes, codigo, categorias }) {
   if (!iaConfigurada()) throw Object.assign(new Error('La IA todavía no está configurada en el servidor.'), { status: 503 });
 
   let r;
@@ -54,7 +55,7 @@ async function leerProducto({ imagenBase64, mimeType = 'image/jpeg', codigo, cat
           role: 'user',
           parts: [
             { text: instrucciones(categorias, codigo) },
-            { inline_data: { mime_type: mimeType, data: imagenBase64 } },
+            ...imagenes.map(data => ({ inline_data: { mime_type: 'image/jpeg', data } })),
           ],
         }],
         generationConfig: { responseMimeType: 'application/json', responseSchema: esquema(), temperature: 0.2 },

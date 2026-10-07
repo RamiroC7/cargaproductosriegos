@@ -63,7 +63,7 @@ Si el SKU ya existe en Tiendanube, el producto no se crea de nuevo. Si se corta 
 
 ## Completar con IA
 
-Cuando el código no está en ningún catálogo, la empleada saca una foto de la etiqueta y toca **Completar con IA**: la IA lee la foto principal y completa tipo, marca, modelo, medida, categoría, descripción, especificaciones, modo de uso y qué incluye. Solo llena campos vacíos y los marca en azul.
+Cuando el código no está en ningún catálogo, la empleada saca una foto de la etiqueta y toca **Completar con IA**: la IA lee hasta 4 fotos del producto y completa tipo, marca, modelo, medida, categoría, descripción, especificaciones, modo de uso y qué incluye. Solo llena campos vacíos y los marca en azul.
 
 - Usa Google Gemini (`api/_ia.js`), que tiene uso gratis con límites diarios. Key en `GEMINI_API_KEY` (se saca en https://aistudio.google.com) y modelo opcional en `GEMINI_MODELO` (por defecto `gemini-3.8-flash`).
 - En el plan gratis Google puede usar las fotos enviadas para mejorar sus productos. Solo viajan fotos de envases y etiquetas.

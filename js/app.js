@@ -238,16 +238,16 @@
   }
 
   $('#btn-ia').addEventListener('click', async () => {
-    const foto = actual.fotos[0];
-    if (!foto) return;
+    const fotos = actual.fotos.slice(0, 4);
+    if (!fotos.length) return;
     const boton = $('#btn-ia');
     const contenido = boton.innerHTML;
     boton.disabled = true;
-    boton.innerHTML = `${SPINNER}Leyendo la foto…`;
-    setEstado('buscando_info', 'La IA está leyendo la foto principal…');
+    boton.innerHTML = `${SPINNER}Leyendo ${fotos.length === 1 ? 'la foto' : 'las fotos'}…`;
+    setEstado('buscando_info', `La IA está leyendo ${fotos.length === 1 ? 'la foto' : `las ${fotos.length} fotos`}…`);
     try {
-      const imagen = await Imagenes.reducir(foto.blob, 1024);
-      const info = await TN.completarConIA(imagen, form.elements.codigo.value.replace(/\D/g, ''));
+      const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, 1024)));
+      const info = await TN.completarConIA(imagenes, form.elements.codigo.value.replace(/\D/g, ''));
       const llenados = autocompletarIA(info);
       setEstado(llenados.length ? 'completado_automatico' : 'modo_manual', llenados.length
         ? 'La IA completó lo marcado en azul. Revisalo antes de publicar: puede equivocarse.'
