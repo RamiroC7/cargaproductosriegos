@@ -74,7 +74,7 @@ Alternativa (app de Partners con OAuth): los endpoints `/api/tiendanube-conectar
 
 Cuando el código no está en ningún catálogo, la empleada saca una foto de la etiqueta y toca **Completar con IA**: la IA lee hasta 4 fotos del producto y completa tipo, marca, modelo, medida, categoría, descripción, especificaciones, modo de uso y qué incluye. Solo llena campos vacíos y los marca en azul. Las fotos marcadas **Solo IA** (etiquetas, dorsos, códigos) se leen pero nunca se suben a la tienda.
 
-- Usa Google Gemini (`api/_ia.js`), que tiene uso gratis con límites diarios. Key en `GEMINI_API_KEY` (se saca en https://aistudio.google.com) y modelo opcional en `GEMINI_MODELO` (por defecto `gemini-3.8-flash`).
+- IAs (`api/_ia.js`), cada una se usa solo si su key está cargada: Gemini (`GEMINI_API_KEY`, gratis con límites), ChatGPT (`OPENAI_API_KEY`, modelo `gpt-6-luna`), Grok (`XAI_API_KEY`, `grok-4.7`) y Claude (`ANTHROPIC_API_KEY`, `claude-opus-5-5`). Primero Gemini; si está saturado o tarda 6 s, entran las pagas de la más barata a la más cara, en paralelo escalonado. Cada intento queda en los logs de Vercel ("IA intentos").
 - En el plan gratis Google puede usar las fotos enviadas para mejorar sus productos. Solo viajan fotos de envases y etiquetas.
 - Si no hay key cargada, el botón no aparece.
 

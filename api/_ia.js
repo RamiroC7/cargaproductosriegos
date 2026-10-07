@@ -1,20 +1,26 @@
-// Lectura de la foto de un producto con IA: devuelve los datos para autocompletar el formulario.
-// La API key vive solo en el servidor.
+// Lectura de las fotos de un producto con IA: devuelve los datos para autocompletar el formulario.
+// Las API keys viven solo en el servidor. Cada IA se usa solo si su key está cargada.
 //
-// Variables de entorno:
-//   GEMINI_API_KEY   key de Google AI Studio (https://aistudio.google.com). Tiene uso gratis con límites diarios.
-//   GEMINI_MODELO    opcional; por defecto 'gemini-3.8-flash'.
+// Variables de entorno (todas opcionales; con una alcanza):
+//   GEMINI_API_KEY     Google AI Studio (gratis con límites). Modelo: GEMINI_MODELO (def. 'gemini-3.8-flash').
+//   OPENAI_API_KEY     ChatGPT (OpenAI, pago).        Modelo: OPENAI_MODELO (def. 'gpt-6-luna').
+//   XAI_API_KEY        Grok (xAI, pago).              Modelo: XAI_MODELO    (def. 'grok-4.7').
+//   ANTHROPIC_API_KEY  Claude (Anthropic, pago).      Modelo: CLAUDE_MODELO (def. 'claude-opus-5-5').
+//
+// Orden: primero Gemini (gratis); si está saturado o tarda, entran las pagas de la más barata a la más cara.
+// Las IAs compiten en vez de esperar en fila: si una no respondió en ESCALON_MS (o falló), arranca la
+// siguiente en paralelo, y gana la primera respuesta buena. El error de una nunca frena a las otras.
 //
 // Nota: en el plan gratis Google puede usar lo que se envía para mejorar sus productos.
 // Acá solo viajan fotos de envases y etiquetas, no datos de clientes.
+const AnthropicSDK = require('@anthropic-ai/sdk');
+const Anthropic = AnthropicSDK.default || AnthropicSDK;
 
-const MODELO = () => process.env.GEMINI_MODELO || 'gemini-3.8-flash';
-// Si el modelo principal está saturado, se prueba con estos (también gratis), en orden.
-const RESPALDOS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
-const TIMEOUT_MS = 45000; // tope por modelo
-const ESCALON_MS = 6000;  // si un modelo no respondió en este tiempo, arranca el siguiente en paralelo
+const TIMEOUT_MS = 45000; // tope por IA
+const ESCALON_MS = 6000;  // si una IA no respondió en este tiempo, arranca la siguiente en paralelo
 
-const iaConfigurada = () => !!process.env.GEMINI_API_KEY;
+const env = (nombre, porDefecto) => process.env[nombre] || porDefecto;
+const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
 
 function instrucciones(categorias, codigo) {
   return `Sos asistente de carga de productos de "Riegos del Sur", un comercio argentino de piletas, riego, jardín, vivero, herramientas y muebles de exterior.
@@ -30,96 +36,186 @@ Reglas:
 - "especificaciones" e "incluye": ítems cortos, uno por elemento.
 - "modoUso": resumí las instrucciones impresas si están; si no, texto vacío.
 - "codigoBarras": los números impresos debajo del código de barras (EAN/UPC, 8 a 14 dígitos), solo dígitos y solo si se leen completos; si no, texto vacío.
-- "pesoKg", "altoCm", "anchoCm", "profundidadCm": estimación del producto EMBALADO para el envío (como número con punto decimal, ej. "10.5"). Basate en el contenido neto, el tamaño del envase o el tamaño habitual de ese producto. Si no podés estimarlo con criterio, texto vacío.`;
+- "pesoKg", "altoCm", "anchoCm", "profundidadCm": estimación del producto EMBALADO para el envío (como número con punto decimal, ej. "10.5"). Basate en el contenido neto, el tamaño del envase o el tamaño habitual de ese producto. Si no podés estimarlo con criterio, texto vacío.
+
+Respondé solo con el JSON pedido.`;
 }
 
-function esquema() {
-  const texto = { type: 'STRING' };
-  const lista = { type: 'ARRAY', items: { type: 'STRING' } };
+const CAMPOS_TEXTO = ['tipo', 'marca', 'modelo', 'medida', 'categoria', 'paraQue', 'modoUso', 'codigoBarras', 'pesoKg', 'altoCm', 'anchoCm', 'profundidadCm'];
+const CAMPOS_LISTA = ['especificaciones', 'incluye'];
+const TODOS = [...CAMPOS_TEXTO, ...CAMPOS_LISTA];
+
+// Esquema en JSON Schema estándar (OpenAI, Grok y Claude).
+function esquemaJson() {
+  const properties = {};
+  CAMPOS_TEXTO.forEach(c => { properties[c] = { type: 'string' }; });
+  CAMPOS_LISTA.forEach(c => { properties[c] = { type: 'array', items: { type: 'string' } }; });
+  return { type: 'object', properties, required: TODOS, additionalProperties: false };
+}
+
+// El mismo esquema en el formato propio de Gemini.
+function esquemaGemini() {
+  const properties = {};
+  CAMPOS_TEXTO.forEach(c => { properties[c] = { type: 'STRING' }; });
+  CAMPOS_LISTA.forEach(c => { properties[c] = { type: 'ARRAY', items: { type: 'STRING' } }; });
+  return { type: 'OBJECT', properties, required: TODOS };
+}
+
+// ---------- Cada IA: recibe un AbortSignal y devuelve { status, texto, motivo } ----------
+
+async function leerJson(r) { return r.json().catch(() => ({})); }
+
+function gemini(modelo) {
   return {
-    type: 'OBJECT',
-    properties: {
-      tipo: texto, marca: texto, modelo: texto, medida: texto, categoria: texto,
-      paraQue: texto, especificaciones: lista, modoUso: texto, incluye: lista,
-      codigoBarras: texto, pesoKg: texto, altoCm: texto, anchoCm: texto, profundidadCm: texto,
+    nombre: modelo,
+    async pedir({ prompt, imagenes, signal }) {
+      const cuerpo = pensarPoco => JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }, ...imagenes.map(data => ({ inline_data: { mime_type: 'image/jpeg', data } }))] }],
+        generationConfig: {
+          responseMimeType: 'application/json', responseSchema: esquemaGemini(), temperature: 0.2,
+          // Para leer una etiqueta alcanza con "pensar poco": responde más rápido.
+          ...(pensarPoco ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
+        },
+      });
+      const llamar = async pensarPoco => {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+          body: cuerpo(pensarPoco), signal,
+        });
+        return { r, json: await leerJson(r) };
+      };
+      let { r, json } = await llamar(true);
+      // Si el modelo no acepta el ajuste de "pensar poco", se repite sin él.
+      if (r.status === 400 && /think/i.test(json?.error?.message || '')) ({ r, json } = await llamar(false));
+      if (!r.ok) return { status: r.status, motivo: json?.error?.message };
+      const c = json.candidates?.[0];
+      const texto = (c?.content?.parts || []).map(p => p.text || '').join('');
+      return texto ? { status: 200, texto } : { status: 502, motivo: `sin datos (${c?.finishReason || json.promptFeedback?.blockReason || 'vacío'})` };
     },
-    required: ['tipo', 'marca', 'modelo', 'medida', 'categoria', 'paraQue', 'especificaciones', 'modoUso', 'incluye',
-      'codigoBarras', 'pesoKg', 'altoCm', 'anchoCm', 'profundidadCm'],
   };
+}
+
+// OpenAI y Grok usan el mismo formato de "chat completions".
+function compatibleOpenAI(nombre, url, key, modelo) {
+  return {
+    nombre,
+    async pedir({ prompt, imagenes, signal }) {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model: modelo,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              ...imagenes.map(data => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${data}` } })),
+            ],
+          }],
+          response_format: { type: 'json_schema', json_schema: { name: 'producto', strict: true, schema: esquemaJson() } },
+        }),
+        signal,
+      });
+      const json = await leerJson(r);
+      if (!r.ok) return { status: r.status, motivo: json?.error?.message || json?.error };
+      const texto = json.choices?.[0]?.message?.content;
+      return texto ? { status: 200, texto } : { status: 502, motivo: 'sin datos' };
+    },
+  };
+}
+
+function claude(modelo) {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return {
+    nombre: modelo,
+    async pedir({ prompt, imagenes, signal }) {
+      try {
+        const respuesta = await client.beta.messages.create({
+          model: modelo,
+          max_tokens: 4000,
+          // Si Claude rechazara el pedido por sus filtros, lo reintenta otro modelo de Anthropic.
+          betas: ['server-side-fallback-2026-07-01'],
+          fallbacks: 'default',
+          // Leer una etiqueta es simple: esfuerzo bajo = respuesta más rápida y barata.
+          output_config: { effort: 'low', format: { type: 'json_schema', schema: esquemaJson() } },
+          messages: [{
+            role: 'user',
+            content: [
+              ...imagenes.map(data => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } })),
+              { type: 'text', text: prompt },
+            ],
+          }],
+        }, { signal, maxRetries: 0, timeout: TIMEOUT_MS });
+        if (respuesta.stop_reason === 'refusal') return { status: 502, motivo: 'rechazado por Claude' };
+        const texto = respuesta.content.filter(b => b.type === 'text').map(b => b.text).join('');
+        return texto ? { status: 200, texto } : { status: 502, motivo: `sin datos (${respuesta.stop_reason})` };
+      } catch (e) {
+        if (e instanceof Anthropic.APIUserAbortError) throw e;
+        if (e instanceof Anthropic.APIError) return { status: e.status || 502, motivo: e.message };
+        throw e;
+      }
+    },
+  };
+}
+
+// Las IAs disponibles, en el orden en que se prueban.
+function candidatas() {
+  const lista = [];
+  const geminiPrincipal = env('GEMINI_MODELO', 'gemini-3.8-flash');
+  if (process.env.GEMINI_API_KEY) lista.push(gemini(geminiPrincipal), gemini('gemini-3.6-flash'));
+  if (process.env.OPENAI_API_KEY) lista.push(compatibleOpenAI(env('OPENAI_MODELO', 'gpt-6-luna'), 'https://api.openai.com/v1/chat/completions', process.env.OPENAI_API_KEY, env('OPENAI_MODELO', 'gpt-6-luna')));
+  if (process.env.XAI_API_KEY) lista.push(compatibleOpenAI(env('XAI_MODELO', 'grok-4.7'), 'https://api.x.ai/v1/chat/completions', process.env.XAI_API_KEY, env('XAI_MODELO', 'grok-4.7')));
+  if (process.env.ANTHROPIC_API_KEY) lista.push(claude(env('CLAUDE_MODELO', 'claude-opus-5-5')));
+  if (process.env.GEMINI_API_KEY) lista.push(gemini('gemini-3.7-flash'), gemini('gemini-3.5-flash'));
+  // Sin repetidos (por si GEMINI_MODELO coincide con un respaldo).
+  return lista.filter((x, i) => lista.findIndex(y => y.nombre === x.nombre) === i);
 }
 
 // imagenes: lista de fotos en base64 (JPG) del mismo producto.
 async function leerProducto({ imagenes, codigo, categorias }) {
   if (!iaConfigurada()) throw Object.assign(new Error('La IA todavía no está configurada en el servidor.'), { status: 503 });
 
-  // Para leer una etiqueta alcanza con "pensar poco": responde bastante más rápido.
-  const armarCuerpo = pensarPoco => JSON.stringify({
-    contents: [{
-      role: 'user',
-      parts: [
-        { text: instrucciones(categorias, codigo) },
-        ...imagenes.map(data => ({ inline_data: { mime_type: 'image/jpeg', data } })),
-      ],
-    }],
-    generationConfig: {
-      responseMimeType: 'application/json', responseSchema: esquema(), temperature: 0.2,
-      ...(pensarPoco ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
-    },
-  });
-  const cuerpoRapido = armarCuerpo(true), cuerpoNormal = armarCuerpo(false);
-
-  const intentos = []; // queda en los registros de Vercel para saber por qué falló cada modelo
+  const prompt = instrucciones(categorias, codigo);
+  const ias = candidatas();
+  const intentos = []; // queda en los registros de Vercel para saber qué pasó con cada IA
   const controles = [];
   let resuelto = false;
 
-  async function llamar(modelo, cuerpo) {
+  async function intentar(ia) {
     const control = new AbortController();
     controles.push(control);
     const reloj = setTimeout(() => control.abort(), TIMEOUT_MS);
     const t0 = Date.now();
+    let r;
     try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
-        body: cuerpo,
-        signal: control.signal,
-      });
-      return { modelo, status: r.status, json: await r.json().catch(() => ({})), ms: Date.now() - t0 };
+      r = await ia.pedir({ prompt, imagenes, signal: control.signal });
     } catch {
-      // Cortado por demora, o porque otro modelo ya respondió.
-      return { modelo, status: resuelto ? 0 : 504, json: {}, ms: Date.now() - t0 };
+      // Cortada por demora, porque otra IA ya respondió, o sin conexión.
+      r = resuelto ? { status: 0 } : { status: control.signal.aborted ? 504 : 502, motivo: control.signal.aborted ? 'tardó demasiado' : 'no se pudo conectar' };
     } finally {
       clearTimeout(reloj);
     }
+    if (r.status !== 0) intentos.push({ ia: ia.nombre, status: r.status, ms: Date.now() - t0, motivo: r.status === 200 ? 'ok' : String(r.motivo || '').slice(0, 160) });
+    return { ...r, ia: ia.nombre };
   }
 
-  async function intentar(modelo) {
-    let r = await llamar(modelo, cuerpoRapido);
-    // Si el modelo no acepta el ajuste de "pensar poco", se repite sin él.
-    if (r.status === 400 && /think/i.test(r.json?.error?.message || '')) r = await llamar(modelo, cuerpoNormal);
-    if (r.status !== 0) {
-      intentos.push({ modelo, status: r.status, ms: r.ms, motivo: r.status === 200 ? 'ok' : r.status === 504 ? 'tardó demasiado' : (r.json?.error?.message || '').slice(0, 160) });
-    }
-    return r;
-  }
-
-  // Los modelos compiten en vez de esperar en fila: arranca el principal; si a los pocos segundos
-  // no respondió (o falló), arranca el siguiente, y se queda con la primera respuesta buena.
-  // Saturado (503/500), límite (429), no disponible (404) o demora: se sigue con otro.
-  // Cualquier otro error (key inválida, pedido mal armado) corta en el acto.
-  const modelos = [...new Set([MODELO(), ...RESPALDOS])];
   const ganador = await new Promise(resolver => {
-    let lanzados = 0, terminados = 0;
-    const terminar = valor => { if (!resuelto) { resuelto = true; clearInterval(escalonado); controles.forEach(c => c.abort()); resolver(valor); } };
+    let lanzadas = 0, terminadas = 0;
+    const terminar = valor => {
+      if (resuelto) return;
+      resuelto = true;
+      clearInterval(escalonado);
+      controles.forEach(c => c.abort());
+      resolver(valor);
+    };
     const lanzar = () => {
-      if (resuelto || lanzados >= modelos.length) return;
-      const modelo = modelos[lanzados++];
-      intentar(modelo).then(r => {
-        terminados++;
+      if (resuelto || lanzadas >= ias.length) return;
+      const ia = ias[lanzadas++];
+      intentar(ia).then(r => {
+        terminadas++;
         if (r.status === 200) return terminar(r);
-        if (r.status !== 0 && ![404, 429, 500, 503, 504].includes(r.status)) return terminar(r); // error de fondo
-        if (lanzados < modelos.length) lanzar();
-        else if (terminados >= lanzados) terminar(null);
+        if (lanzadas < ias.length) lanzar();
+        else if (terminadas >= lanzadas) terminar(null);
       });
     };
     const escalonado = setInterval(lanzar, ESCALON_MS);
@@ -127,35 +223,22 @@ async function leerProducto({ imagenes, codigo, categorias }) {
   });
   console.log('IA intentos', JSON.stringify(intentos));
 
-  if (ganador && ganador.status !== 200) {
-    throw Object.assign(new Error(`La IA respondió ${ganador.status}: ${ganador.json?.error?.message || 'error desconocido'}`), { status: 502 });
-  }
-  const datos = ganador?.json || null, modeloUsado = ganador?.modelo || null;
-  // El motivo a mostrar: si algún modelo dijo "límite de uso", ese; si no, el último fallo.
-  let ultimo = intentos.find(x => x.status === 429) || intentos.at(-1) || null;
-
-  if (!datos) {
-    if (ultimo?.status === 429) {
+  if (!ganador) {
+    const hayPagas = ias.some(x => !x.nombre.startsWith('gemini'));
+    if (!hayPagas && intentos.some(x => x.status === 429)) {
       throw Object.assign(new Error('Se alcanzó el límite de uso gratis de la IA. Esperá un minuto (o hasta mañana si es el límite diario) y probá de nuevo.'), { status: 429 });
     }
     if (intentos.length && intentos.every(x => x.status === 504)) {
       throw Object.assign(new Error('La IA tardó demasiado en responder. Probá con menos fotos o de nuevo en unos minutos.'), { status: 504 });
     }
-    if (ultimo?.status === 404) {
-      throw Object.assign(new Error(`Ningún modelo de IA está disponible para esta cuenta de Google (${ultimo.motivo}). Avisale al administrador.`), { status: 502 });
+    if (!hayPagas) {
+      throw Object.assign(new Error('La IA de Google está saturada en este momento. Probá de nuevo en unos minutos o completá los datos a mano.'), { status: 503 });
     }
-    throw Object.assign(new Error('La IA de Google está saturada en este momento. Probá de nuevo en unos minutos o completá los datos a mano.'), { status: 503 });
-  }
-
-  const candidato = datos.candidates?.[0];
-  const texto = (candidato?.content?.parts || []).map(p => p.text || '').join('');
-  if (!texto) {
-    const motivo = candidato?.finishReason || datos.promptFeedback?.blockReason || 'sin respuesta';
-    throw Object.assign(new Error(`La IA no devolvió datos (${motivo}). Probá con otra foto.`), { status: 502 });
+    throw Object.assign(new Error('Ninguna IA pudo leer las fotos en este momento. Probá de nuevo en unos minutos o completá los datos a mano.'), { status: 503 });
   }
 
   let campos;
-  try { campos = JSON.parse(texto); } catch { throw Object.assign(new Error('La IA devolvió un formato inesperado. Probá de nuevo.'), { status: 502 }); }
+  try { campos = JSON.parse(ganador.texto); } catch { throw Object.assign(new Error('La IA devolvió un formato inesperado. Probá de nuevo.'), { status: 502 }); }
 
   const limpiar = v => String(v ?? '').replace(/\s+/g, ' ').trim();
   const listar = v => (Array.isArray(v) ? v : []).map(limpiar).filter(Boolean);
@@ -173,7 +256,7 @@ async function leerProducto({ imagenes, codigo, categorias }) {
     categoria: categorias.includes(limpiar(campos.categoria)) ? limpiar(campos.categoria) : '',
     paraQue: limpiar(campos.paraQue), especificaciones: listar(campos.especificaciones),
     modoUso: limpiar(campos.modoUso), incluye: listar(campos.incluye),
-    modelo_ia: modeloUsado,
+    modelo_ia: ganador.ia,
   };
 }
 

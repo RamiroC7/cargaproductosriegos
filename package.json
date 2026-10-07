@@ -1,8 +1,11 @@
 {
   "name": "carga-productos-riegos",
   "private": true,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.0",
     "@vercel/blob": "^2.8.1"
   }
 }
