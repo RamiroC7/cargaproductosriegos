@@ -50,5 +50,16 @@ window.Imagenes = (() => {
     });
   }
 
-  return { procesar, aBase64 };
+  // Copia achicada (JPG, base64) para mandar a la IA: más rápido y dentro de los límites del servidor.
+  async function reducir(blob, lado = 1024) {
+    const img = await cargar(blob);
+    const escala = Math.min(1, lado / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.width * escala);
+    canvas.height = Math.round(img.height * escala);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return aBase64(await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85)));
+  }
+
+  return { procesar, aBase64, reducir };
 })();

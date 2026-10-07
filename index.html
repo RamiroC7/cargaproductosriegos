@@ -223,6 +223,13 @@
               </label>
             </div>
             <p id="fotos-procesando" class="hidden text-sm text-slate-500 mt-3">Procesando fotos…</p>
+            <div id="ia-panel" class="hidden mt-3 rounded-xl border border-marca-200 bg-marca-50 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+              <p class="text-sm text-marca-900 flex-1">La IA lee la <b>foto principal</b> y completa los datos del producto. Funciona mejor si se ve bien la etiqueta.</p>
+              <button type="button" id="btn-ia" class="btn-primario shrink-0">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
+                <span>Completar con IA</span>
+              </button>
+            </div>
             <div id="fotos-grilla" class="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-4"></div>
           </div>
 

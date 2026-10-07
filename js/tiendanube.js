@@ -160,6 +160,13 @@ window.TN = (() => {
   }
   const salir = () => llamar('POST', '/api/logout');
 
+  // La IA lee la foto y devuelve campos sugeridos. Tira error con un mensaje para mostrar.
+  async function completarConIA(imagenBase64, codigo) {
+    const r = await llamar('POST', '/api/ia-completar', { imagen: imagenBase64, codigo, categorias: C.CATEGORIAS });
+    if (!r.ok) throw new Error(r.datos.error || `Error ${r.status} al consultar la IA.`);
+    return r.datos;
+  }
+
   // Qué está configurado en el servidor. Si no hay backend, todo queda en false.
   let estadoServidor = { backend: false, tiendanube: false, registro: false };
   async function cargarEstado() {
@@ -225,5 +232,5 @@ window.TN = (() => {
     }
   }
 
-  return { armarNombre, titulo, armarPayload, armarRegistro, sinEnvio, skus, numero, slug, sugerirCategoria, cargarEstado, estado, conectado, buscarCodigo, publicar, sesion, ingresar, salir };
+  return { armarNombre, titulo, armarPayload, armarRegistro, sinEnvio, skus, numero, slug, sugerirCategoria, cargarEstado, estado, conectado, buscarCodigo, publicar, sesion, ingresar, salir, completarConIA };
 })();

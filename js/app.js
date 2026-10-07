@@ -190,31 +190,76 @@
   }
 
   // Completa solo los campos vacíos: nunca pisa lo que la CM ya escribió.
+  function ponerSiVacio(campo, valor, llenados) {
+    const el = form.elements[campo];
+    if (!valor || el.value.trim()) return;
+    el.value = valor;
+    el.classList.add('autocompletado');
+    llenados.push(campo);
+  }
+
+  function elegirCategoriaSiVacia(categoria, llenados) {
+    if (!categoria || form.elements.categoria.value) return;
+    const opcion = $(`input[name=categoria][value="${CSS.escape(categoria)}"]`);
+    if (!opcion) return;
+    opcion.checked = true;
+    llenados.push('categoria');
+  }
+
   function autocompletar(info) {
     const llenados = [];
-    const poner = (campo, valor) => {
-      const el = form.elements[campo];
-      if (!valor || el.value.trim()) return;
-      el.value = valor;
-      el.classList.add('autocompletado');
-      llenados.push(campo);
-    };
+    const poner = (campo, valor) => ponerSiVacio(campo, valor, llenados);
     poner('nombre', info.nombre);
     if (llenados.includes('nombre')) actual.datos.nombreManual = true;
     poner('marca', info.marca);
     poner('paraQue', info.descripcion);
 
-    const sugerida = TN.sugerirCategoria(`${info.categoriaExterna} ${info.nombre}`);
-    if (sugerida && !form.elements.categoria.value) {
-      $(`input[name=categoria][value="${CSS.escape(sugerida)}"]`).checked = true;
-      llenados.push('categoria');
-    }
+    elegirCategoriaSiVacia(TN.sugerirCategoria(`${info.categoriaExterna} ${info.nombre}`), llenados);
 
     actual.datos.fuenteCatalogo = { fuente: info.fuente, categoria: info.categoriaExterna || null, fecha: new Date().toISOString() };
     mostrarCategoriaExterna();
     actualizarDerivados();
     return llenados;
   }
+
+  // ---------- Completar con IA (lee la foto principal) ----------
+  function autocompletarIA(info) {
+    const llenados = [];
+    const poner = (campo, valor) => ponerSiVacio(campo, valor, llenados);
+    // Las partes del nombre: si el título no se escribió a mano, se arma solo con ellas.
+    ['tipo', 'marca', 'modelo', 'medida', 'paraQue', 'modoUso'].forEach(c => poner(c, info[c]));
+    poner('especificaciones', (info.especificaciones || []).join('\n'));
+    poner('incluye', (info.incluye || []).join('\n'));
+    elegirCategoriaSiVacia(info.categoria, llenados);
+    actual.datos.fuenteIA = { modelo: info.modelo_ia || null, fecha: new Date().toISOString() };
+    actualizarDerivados();
+    $$('.autocompletado').forEach(el => el.closest('[data-campo]')?.classList.remove('con-error'));
+    return llenados;
+  }
+
+  $('#btn-ia').addEventListener('click', async () => {
+    const foto = actual.fotos[0];
+    if (!foto) return;
+    const boton = $('#btn-ia');
+    const contenido = boton.innerHTML;
+    boton.disabled = true;
+    boton.innerHTML = `${SPINNER}Leyendo la foto…`;
+    setEstado('buscando_info', 'La IA está leyendo la foto principal…');
+    try {
+      const imagen = await Imagenes.reducir(foto.blob, 1024);
+      const info = await TN.completarConIA(imagen, form.elements.codigo.value.replace(/\D/g, ''));
+      const llenados = autocompletarIA(info);
+      setEstado(llenados.length ? 'completado_automatico' : 'modo_manual', llenados.length
+        ? 'La IA completó lo marcado en azul. Revisalo antes de publicar: puede equivocarse.'
+        : 'La IA no encontró datos nuevos para completar. Probá con una foto donde se lea mejor la etiqueta.');
+      $('[data-campo=codigo]').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      setEstado('modo_manual', e.message);
+    } finally {
+      boton.disabled = false;
+      boton.innerHTML = contenido;
+    }
+  });
 
   async function buscarCodigo() {
     clearTimeout(timerCodigo);
@@ -249,7 +294,9 @@
         ? 'Encontrado en el catálogo global. Completamos lo marcado en azul: revisalo y ajustá lo que haga falta.'
         : 'Encontrado en el catálogo global, pero los campos ya estaban completos. No se cambió nada.');
     } else if (r.tipo === 'no_encontrado') {
-      setEstado('modo_manual', 'Producto no encontrado en el catálogo global. Completalo a mano.');
+      setEstado('modo_manual', TN.estado().ia
+        ? 'Producto no encontrado en el catálogo global. Sacale una foto a la etiqueta y tocá "Completar con IA", o completalo a mano.'
+        : 'Producto no encontrado en el catálogo global. Completalo a mano.');
       if (!form.elements.nombre.value) form.elements.tipo.focus({ preventScroll: true });
     } else {
       setEstado('modo_manual', `No se pudo consultar el catálogo (${r.mensaje}). Seguí cargando a mano.`);
@@ -321,6 +368,7 @@
     const contador = $('#fotos-contador');
     contador.textContent = ok ? `${n} ${n === 1 ? 'foto' : 'fotos'} ✓` : `${n} de ${C.FOTOS_MINIMO} mínimo`;
     contador.className = `shrink-0 text-xs font-medium rounded-full px-2.5 py-1 ${ok ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`;
+    $('#ia-panel').classList.toggle('hidden', !(TN.estado().ia && n > 0 && actual.estado !== 'publicado'));
   }
 
   $('#fotos-grilla').addEventListener('click', e => {
@@ -646,6 +694,6 @@
 
   // ---------- Inicio ----------
   cargarEnForm(vacio());
-  TN.cargarEstado();
+  TN.cargarEstado().then(() => renderFotos());
   actualizarContador().catch(() => aviso('Este navegador no permite guardar datos. Probá con Chrome o Safari actualizados.', 'error'));
 })();

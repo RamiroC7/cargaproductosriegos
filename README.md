@@ -61,6 +61,14 @@ Si el SKU ya existe en Tiendanube, el producto no se crea de nuevo. Si se corta 
 - Estados del formulario: `escaneando` → `buscando_info` → `completado_automatico` o `modo_manual` → `guardando`. Solo se completan campos vacíos y quedan marcados en azul.
 - **Ojo:** en las pruebas, los productos argentinos (códigos 779…) no aparecieron en upcitemdb. Para el vivero y lo artesanal la carga va a ser manual de todos modos.
 
+## Completar con IA
+
+Cuando el código no está en ningún catálogo, la empleada saca una foto de la etiqueta y toca **Completar con IA**: la IA lee la foto principal y completa tipo, marca, modelo, medida, categoría, descripción, especificaciones, modo de uso y qué incluye. Solo llena campos vacíos y los marca en azul.
+
+- Usa Google Gemini (`api/_ia.js`), que tiene uso gratis con límites diarios. Key en `GEMINI_API_KEY` (se saca en https://aistudio.google.com) y modelo opcional en `GEMINI_MODELO` (por defecto `gemini-3.8-flash`).
+- En el plan gratis Google puede usar las fotos enviadas para mejorar sus productos. Solo viajan fotos de envases y etiquetas.
+- Si no hay key cargada, el botón no aparece.
+
 ## Probar en local
 
 ```
