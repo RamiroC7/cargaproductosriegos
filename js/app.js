@@ -386,7 +386,6 @@
       <div class="relative rounded-xl overflow-hidden border ${f.soloIA ? 'border-dashed border-marca-300' : 'border-slate-200'} bg-white aspect-square">
         <img src="${urlFoto(f)}" alt="Foto ${i + 1}" class="w-full h-full object-contain ${f.soloIA ? 'opacity-60' : ''}">
         ${f === principal ? '<span class="absolute top-1.5 left-1.5 text-[11px] font-semibold bg-marca-700 text-white px-2 py-0.5 rounded-full">Principal</span>' : ''}
-        ${f.completada ? '<span class="absolute top-1.5 right-1.5 text-[11px] bg-white/90 text-slate-600 px-1.5 py-0.5 rounded-full border border-slate-200" title="No era cuadrada: se completó con fondo blanco">Ajustada</span>' : ''}
         <button type="button" data-foto="ia" data-i="${i}"
           class="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] font-semibold px-2 py-1 rounded-full shadow ${f.soloIA ? 'bg-marca-700 text-white' : 'bg-white/90 text-slate-700 border border-slate-200'}"
           aria-pressed="${f.soloIA}" title="${f.soloIA ? 'Esta foto no se publica: tocá para publicarla' : 'Tocá para que no se publique (solo la lee la IA)'}">
@@ -402,7 +401,7 @@
     const n = publicables(fotos).length, ok = n >= C.FOTOS_MINIMO;
     const soloIA = fotos.length - n;
     const contador = $('#fotos-contador');
-    contador.textContent = (ok ? `${n} ${n === 1 ? 'foto' : 'fotos'} ✓` : `${n} de ${C.FOTOS_MINIMO} mínimo`) + (soloIA ? ` · ${soloIA} solo IA` : '');
+    contador.textContent = (ok ? `${n} ${n === 1 ? 'foto' : 'fotos'} ✓` : `Falta${C.FOTOS_MINIMO - n === 1 ? "" : "n"} ${C.FOTOS_MINIMO - n} foto${C.FOTOS_MINIMO - n === 1 ? "" : "s"}`) + (soloIA ? ` · ${soloIA} solo IA` : '');
     contador.className = `shrink-0 text-xs font-medium rounded-full px-2.5 py-1 ${ok ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`;
     const conIA = TN.estado().ia && actual.estado !== 'publicado';
     $('#ia-panel').classList.toggle('hidden', !(conIA && fotos.length > 0));

@@ -224,12 +224,12 @@
                 <label class="lbl" for="precio">Precio de venta <span class="text-red-600">*</span></label>
                 <div class="relative">
                   <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                  <input id="precio" name="precio" class="inp pl-7" inputmode="decimal" placeholder="12.500">
+                  <input id="precio" name="precio" class="inp pl-7" inputmode="decimal" placeholder="Ej.: 12.500">
                 </div>
               </div>
               <div data-campo="stock" id="grupo-stock">
                 <label class="lbl" for="stock">Cantidad en stock <span class="text-red-600">*</span></label>
-                <input id="stock" name="stock" class="inp" inputmode="numeric" placeholder="10">
+                <input id="stock" name="stock" class="inp" inputmode="numeric" placeholder="Ej.: 10">
               </div>
             </div>
             <p id="ayuda-stock-variantes" class="ayuda hidden">Con variantes, la cantidad se carga en cada una (abajo, en el paso 4). Si una variante tiene otro precio, también se indica ahí.</p>
@@ -240,19 +240,19 @@
               <div id="envio-campos" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div data-campo="peso">
                   <label class="lbl" for="peso">Peso (kg) <span class="text-red-600">*</span></label>
-                  <input id="peso" name="peso" class="inp" inputmode="decimal" placeholder="1,5">
+                  <input id="peso" name="peso" class="inp" inputmode="decimal" placeholder="Ej.: 1,5">
                 </div>
                 <div data-campo="alto">
                   <label class="lbl" for="alto">Alto (cm) <span class="text-red-600">*</span></label>
-                  <input id="alto" name="alto" class="inp" inputmode="decimal" placeholder="20">
+                  <input id="alto" name="alto" class="inp" inputmode="decimal" placeholder="Ej.: 20">
                 </div>
                 <div data-campo="ancho">
                   <label class="lbl" for="ancho">Ancho (cm) <span class="text-red-600">*</span></label>
-                  <input id="ancho" name="ancho" class="inp" inputmode="decimal" placeholder="30">
+                  <input id="ancho" name="ancho" class="inp" inputmode="decimal" placeholder="Ej.: 30">
                 </div>
                 <div data-campo="profundidad">
                   <label class="lbl" for="profundidad">Profundidad (cm) <span class="text-red-600">*</span></label>
-                  <input id="profundidad" name="profundidad" class="inp" inputmode="decimal" placeholder="30">
+                  <input id="profundidad" name="profundidad" class="inp" inputmode="decimal" placeholder="Ej.: 30">
                 </div>
               </div>
               <p id="envio-servicio" class="hidden text-sm text-slate-600 rounded-xl bg-slate-50 p-3">Los servicios no se envían, así que no hace falta peso ni medidas.</p>
@@ -337,7 +337,7 @@
       <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 class="text-xl sm:text-2xl font-semibold text-slate-900">Productos cargados</h1>
         <div class="flex gap-2">
-          <button type="button" id="btn-exportar" class="btn-secundario">Exportar JSON</button>
+          <button type="button" id="btn-exportar" class="btn-secundario">Descargar respaldo</button>
           <button type="button" id="btn-ir-cargar" class="btn-primario">+ Nuevo</button>
         </div>
       </div>
