@@ -43,12 +43,14 @@ La sesión dura 12 horas y se guarda en una cookie `HttpOnly` (el JavaScript de 
 
 ## Conectarlo con Tiendanube
 
-1. En el [Portal de Partners](https://partners.tiendanube.com) creá una app con permisos de **write_products**, instalala en la tienda y guardá el `access_token` y el `store_id` (`user_id`).
-2. Cargá estas variables de entorno en Vercel:
-   - `TN_STORE_ID`
-   - `TN_ACCESS_TOKEN`
-   - `TN_USER_AGENT`, por ejemplo `Carga Riegos del Sur (mail@dominio.com)`
-3. Volvé a publicar (`npx vercel deploy --prod`).
+1. En el [Portal de Partners](https://partners.tiendanube.com) creá una app:
+   - Permisos: **Productos → escritura** (`write_products`).
+   - URL de redirección: `https://carga-productos-riegos.vercel.app/api/tiendanube-callback`
+2. Cargá en Vercel el ID y el secreto de la app: `TN_APP_ID` y `TN_CLIENT_SECRET` (`--sensitive`). Volvé a publicar.
+3. En la app, entrá a **Cargados → Conectar con Tiendanube** y aceptá en Tiendanube. La página de vuelta muestra el número de tienda y la clave de acceso.
+4. Cargalos en Vercel como `TN_STORE_ID` y `TN_ACCESS_TOKEN` (`--sensitive`) y volvé a publicar.
+
+`TN_USER_AGENT` ya está cargado. La clave de acceso no vence; deja de valer solo si se desinstala la app o se vuelve a conectar.
 
 Si el SKU ya existe en Tiendanube, el producto no se crea de nuevo. Si se corta a mitad, al reintentar sigue desde la última foto subida.
 

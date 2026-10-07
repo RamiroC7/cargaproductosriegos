@@ -50,9 +50,15 @@ function sesionActual(req) {
   }
 }
 
-function ponerCookie(req, res, valor, maxAge) {
+// SameSite=Lax: la cookie viaja al volver de Tiendanube (navegación GET desde otro sitio),
+// pero no en pedidos POST de otros sitios.
+function cookieTexto(req, nombre, valor, maxAge) {
   const https = req.headers['x-forwarded-proto'] === 'https';
-  res.setHeader('Set-Cookie', `${COOKIE}=${valor}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${https ? '; Secure' : ''}`);
+  return `${nombre}=${valor}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${https ? '; Secure' : ''}`;
+}
+
+function ponerCookie(req, res, valor, maxAge) {
+  res.setHeader('Set-Cookie', cookieTexto(req, COOKIE, valor, maxAge));
 }
 
 const iniciarSesion = (req, res, usuario) => ponerCookie(req, res, crearToken(usuario), DURACION_S);
@@ -67,4 +73,4 @@ function credencialesValidas(usuario, clave) {
   return okUsuario && okClave;
 }
 
-module.exports = { sesionActual, iniciarSesion, cerrarSesion, credencialesValidas };
+module.exports = { sesionActual, iniciarSesion, cerrarSesion, credencialesValidas, leerCookie, cookieTexto };
