@@ -41,6 +41,8 @@
       .btn-foto { @apply grid place-items-center w-8 h-8 rounded-lg bg-white/90 text-slate-800 text-sm shadow disabled:opacity-30; }
       .tab { @apply px-3 py-1.5 rounded-md text-white/80 hover:text-white aria-selected:bg-white aria-selected:text-marca-800 aria-selected:shadow-sm; }
       .inp.autocompletado { @apply bg-marca-50 border-marca-300; }
+      .paso { @apply flex items-center gap-2 pt-2 text-xs font-semibold uppercase tracking-wider text-marca-800; }
+      .paso > span:first-child { @apply grid place-items-center w-6 h-6 rounded-full bg-marca-700 text-white text-xs; }
       .con-error .inp, .inp.con-error { @apply border-red-500 ring-2 ring-red-500/20; }
       .con-error > .lbl, .con-error .card-titulo { @apply text-red-600; }
       .con-error.card { @apply border-red-300; }
@@ -105,7 +107,12 @@
         <h1 id="titulo-form" class="text-xl sm:text-2xl font-semibold text-slate-900">Nuevo producto</h1>
         <button type="button" id="btn-nuevo" class="btn-secundario hidden">+ Nuevo</button>
       </div>
-      <p class="text-sm text-slate-500 mb-5">Los campos con <span class="text-red-600">*</span> son obligatorios para publicar. Podés guardar un borrador en cualquier momento.</p>
+      <p class="text-sm text-slate-500 mb-5">Sacá las fotos, revisá lo que completa la IA y poné precio, cantidad y envío. Lo marcado con <span class="text-red-600">*</span> es obligatorio.</p>
+
+      <div id="banner-parecido" class="hidden mb-5 rounded-xl border border-green-200 bg-green-50 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+        <p class="text-sm text-green-900 flex-1"></p>
+        <button type="button" id="btn-parecido" class="btn-secundario shrink-0">Cargar uno parecido</button>
+      </div>
 
       <div id="aviso-publicado" class="hidden mb-5 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
         Este producto ya está publicado en Tiendanube. Para cambiarlo, editalo desde el panel de Tiendanube.
@@ -115,79 +122,59 @@
       <form id="form" novalidate autocomplete="off">
         <fieldset id="campos" class="space-y-5 min-w-0">
 
-          <!-- Código de barras -->
-          <div class="card" data-campo="codigo">
-            <h2 class="card-titulo">Código de barras</h2>
-            <p class="card-ayuda">Escanealo o escribilo: si está en el catálogo global, completamos los datos solos.</p>
-            <div class="flex gap-2">
-              <div class="relative flex-1 min-w-0">
-                <input id="codigo" name="codigo" class="inp font-mono pr-10" inputmode="numeric" enterkeyhint="search" placeholder="EAN / UPC" maxlength="14">
-                <button type="button" id="btn-buscar-codigo" class="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 grid place-items-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Buscar código">
-                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-                </button>
-              </div>
-              <button type="button" id="btn-escanear" class="btn-primario shrink-0">
-                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M11 8v8M14 8v8M17 8v8"/></svg>
-                <span>Escanear</span>
+          <!-- ===== PASO 1: fotos + IA ===== -->
+          <h2 class="paso"><span>1</span> Fotos</h2>
+          <div class="card" data-campo="fotos">
+            <div class="flex items-start justify-between gap-3">
+              <p class="card-ayuda !mt-0">Sacale una foto al <b>producto de frente</b> (la que se publica) y otra a la <b>etiqueta o el dorso</b> (solo la lee la IA). Con eso se completa casi todo.</p>
+              <span id="fotos-contador" class="shrink-0 text-xs font-medium rounded-full px-2.5 py-1"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="btn-primario cursor-pointer">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                Foto del producto
+                <input type="file" accept="image/*" capture="environment" class="sr-only" data-fotos>
+              </label>
+              <label id="btn-foto-ia" class="btn-secundario cursor-pointer border-dashed border-marca-300 text-marca-800">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
+                Foto de etiqueta
+                <input type="file" accept="image/*" capture="environment" class="sr-only" data-fotos data-solo-ia>
+              </label>
+              <label class="btn-secundario cursor-pointer col-span-2 !py-2 text-slate-600">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+                Elegir de la galería
+                <input type="file" accept="image/*" multiple class="sr-only" data-fotos>
+              </label>
+            </div>
+            <p id="fotos-procesando" class="hidden text-sm text-slate-500 mt-3">Procesando fotos…</p>
+            <div id="fotos-grilla" class="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-4"></div>
+            <div id="ia-panel" class="hidden mt-3 rounded-xl border border-marca-200 bg-marca-50 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+              <p class="text-sm text-marca-900 flex-1">Al sacar la foto de la etiqueta, la IA completa los datos sola. Si agregaste más fotos, podés volver a pedírselo.</p>
+              <button type="button" id="btn-ia" class="btn-primario shrink-0">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
+                <span>Completar con IA</span>
               </button>
             </div>
             <div id="estado-busqueda" class="hidden mt-3 rounded-xl px-3 py-2.5 text-sm" role="status" aria-live="polite"></div>
           </div>
 
-          <!-- Código y categoría -->
+          <!-- ===== PASO 2: revisar ===== -->
+          <h2 class="paso"><span>2</span> Revisá</h2>
           <div class="card">
-            <h2 class="card-titulo">Código y categoría</h2>
-            <p class="card-ayuda">El SKU es el mismo código que usan en Contabilium: con él se vinculan el precio y el stock.</p>
-            <div class="space-y-4">
-              <div data-campo="sku">
-                <label class="lbl" for="sku">SKU <span class="text-red-600">*</span></label>
-                <input id="sku" name="sku" class="inp font-mono" autocapitalize="characters" spellcheck="false" placeholder="Ej.: MAN-TR-12-25">
-                <p id="ayuda-sku-variantes" class="ayuda hidden">Como tiene variantes, este queda como código general. Cada variante lleva su propio SKU más abajo.</p>
-              </div>
-              <div data-campo="categoria">
-                <span class="lbl">Categoría <span class="text-red-600">*</span></span>
-                <div id="categorias" class="flex flex-wrap gap-2"></div>
-                <p id="categoria-externa" class="ayuda hidden"></p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Precio y stock -->
-          <div class="card">
-            <h2 class="card-titulo">Precio y cantidad</h2>
-            <p class="card-ayuda">Precio final de venta en pesos y cuántas unidades hay disponibles.</p>
-            <div class="grid grid-cols-2 gap-4">
-              <div data-campo="precio">
-                <label class="lbl" for="precio">Precio de venta <span class="text-red-600">*</span></label>
-                <div class="relative">
-                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                  <input id="precio" name="precio" class="inp pl-7" inputmode="decimal" placeholder="12.500">
-                </div>
-              </div>
-              <div data-campo="stock" id="grupo-stock">
-                <label class="lbl" for="stock">Cantidad en stock <span class="text-red-600">*</span></label>
-                <input id="stock" name="stock" class="inp" inputmode="numeric" placeholder="10">
-              </div>
-            </div>
-            <p id="ayuda-stock-variantes" class="ayuda hidden">Con variantes, la cantidad se carga en cada una. Si una variante tiene otro precio, también se indica ahí.</p>
-          </div>
-
-          <!-- Nombre -->
-          <div class="card">
-            <h2 class="card-titulo">Nombre del producto</h2>
-            <p class="card-ayuda">Completá las partes y el título se arma solo. También lo podés escribir o corregir directamente.</p>
+            <h3 class="card-titulo">Nombre y categoría</h3>
+            <p class="card-ayuda">Lo marcado en azul lo completó la IA o el catálogo: corregí lo que haga falta.</p>
             <div data-campo="nombre" class="mb-4">
               <label class="lbl" for="nombre">Título en la tienda <span class="text-red-600">*</span></label>
               <input id="nombre" name="nombre" class="inp font-medium" placeholder="Se arma con las partes de abajo">
               <p class="ayuda"><button type="button" id="btn-rearmar" class="hidden text-marca-700 underline">Volver a armarlo con las partes</button></p>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="grid grid-cols-2 gap-3">
               <div data-campo="tipo">
                 <label class="lbl" for="tipo">Tipo</label>
                 <input id="tipo" name="tipo" class="inp" autocapitalize="sentences" placeholder="Ej.: Manguera">
               </div>
               <div data-campo="marca">
-                <label class="lbl" for="marca">Marca <span class="opc">(si la tiene)</span></label>
+                <label class="lbl" for="marca">Marca</label>
                 <input id="marca" name="marca" class="inp" placeholder="Ej.: Tramontina">
               </div>
               <div data-campo="modelo">
@@ -199,49 +186,16 @@
                 <input id="medida" name="medida" class="inp" placeholder='Ej.: 1/2" x 25 m'>
               </div>
             </div>
+            <div data-campo="categoria" class="mt-4">
+              <span class="lbl">Categoría <span class="text-red-600">*</span></span>
+              <div id="categorias" class="flex flex-wrap gap-2"></div>
+              <p id="categoria-externa" class="ayuda hidden"></p>
+            </div>
           </div>
 
-          <!-- Fotos -->
-          <div class="card" data-campo="fotos">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h2 class="card-titulo">Fotos <span class="text-red-600">*</span></h2>
-                <p class="card-ayuda">Al menos 1 (mejor si son 3 o más), con fondo blanco y de 1024 px o más. Si no es cuadrada se completa con blanco. La primera es la principal.</p>
-              </div>
-              <span id="fotos-contador" class="shrink-0 text-xs font-medium rounded-full px-2.5 py-1"></span>
-            </div>
-            <div class="grid grid-cols-2 gap-2 sm:flex">
-              <label class="btn-secundario cursor-pointer">
-                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
-                Sacar foto
-                <input type="file" accept="image/*" capture="environment" class="sr-only" data-fotos>
-              </label>
-              <label class="btn-secundario cursor-pointer">
-                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
-                Elegir fotos
-                <input type="file" accept="image/*" multiple class="sr-only" data-fotos>
-              </label>
-              <label id="btn-foto-ia" class="hidden btn-secundario cursor-pointer col-span-2 border-dashed border-marca-300 text-marca-800">
-                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
-                Foto de etiqueta (solo IA, no se publica)
-                <input type="file" accept="image/*" capture="environment" class="sr-only" data-fotos data-solo-ia>
-              </label>
-            </div>
-            <p id="fotos-procesando" class="hidden text-sm text-slate-500 mt-3">Procesando fotos…</p>
-            <div id="ia-panel" class="hidden mt-3 rounded-xl border border-marca-200 bg-marca-50 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
-              <p class="text-sm text-marca-900 flex-1">La IA lee <b>todas las fotos</b> (hasta 4) y completa los datos. Las marcadas <b>Solo IA</b> se leen pero no se publican.</p>
-              <button type="button" id="btn-ia" class="btn-primario shrink-0">
-                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
-                <span>Completar con IA</span>
-              </button>
-            </div>
-            <div id="fotos-grilla" class="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-4"></div>
-          </div>
-
-          <!-- Descripción -->
           <div class="card">
-            <h2 class="card-titulo">Descripción</h2>
-            <p class="card-ayuda">Se arma la ficha del producto con estas cuatro partes.</p>
+            <h3 class="card-titulo">Descripción</h3>
+            <p class="card-ayuda">Es la ficha que ve el cliente.</p>
             <div class="space-y-4">
               <div data-campo="paraQue">
                 <label class="lbl" for="paraQue">¿Para qué sirve? <span class="text-red-600">*</span></label>
@@ -262,29 +216,76 @@
             </div>
           </div>
 
-          <!-- Envío -->
+          <!-- ===== PASO 3: lo que solo ella sabe ===== -->
+          <h2 class="paso"><span>3</span> Precio, cantidad y envío</h2>
           <div class="card">
-            <h2 class="card-titulo">Peso y medidas del paquete</h2>
-            <p class="card-ayuda">Sin estos datos Tiendanube no puede cotizar los envíos. Medí el producto ya embalado.</p>
-            <div id="envio-campos" class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div data-campo="peso">
-                <label class="lbl" for="peso">Peso (kg) <span class="text-red-600">*</span></label>
-                <input id="peso" name="peso" class="inp" inputmode="decimal" placeholder="1,5">
+            <div class="grid grid-cols-2 gap-4">
+              <div data-campo="precio">
+                <label class="lbl" for="precio">Precio de venta <span class="text-red-600">*</span></label>
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                  <input id="precio" name="precio" class="inp pl-7" inputmode="decimal" placeholder="12.500">
+                </div>
               </div>
-              <div data-campo="alto">
-                <label class="lbl" for="alto">Alto (cm) <span class="text-red-600">*</span></label>
-                <input id="alto" name="alto" class="inp" inputmode="decimal" placeholder="20">
-              </div>
-              <div data-campo="ancho">
-                <label class="lbl" for="ancho">Ancho (cm) <span class="text-red-600">*</span></label>
-                <input id="ancho" name="ancho" class="inp" inputmode="decimal" placeholder="30">
-              </div>
-              <div data-campo="profundidad">
-                <label class="lbl" for="profundidad">Profundidad (cm) <span class="text-red-600">*</span></label>
-                <input id="profundidad" name="profundidad" class="inp" inputmode="decimal" placeholder="30">
+              <div data-campo="stock" id="grupo-stock">
+                <label class="lbl" for="stock">Cantidad en stock <span class="text-red-600">*</span></label>
+                <input id="stock" name="stock" class="inp" inputmode="numeric" placeholder="10">
               </div>
             </div>
-            <p id="envio-servicio" class="hidden text-sm text-slate-600 rounded-xl bg-slate-50 p-3">Los servicios no se envían, así que no hace falta peso ni medidas.</p>
+            <p id="ayuda-stock-variantes" class="ayuda hidden">Con variantes, la cantidad se carga en cada una (abajo, en el paso 4). Si una variante tiene otro precio, también se indica ahí.</p>
+
+            <div class="mt-5 pt-5 border-t border-slate-100">
+              <h3 class="card-titulo">Peso y medidas del paquete</h3>
+              <p class="card-ayuda">Sin esto Tiendanube no cotiza el envío. Si la IA los estimó aparecen en azul: <b>confirmalos</b> con la balanza y la cinta.</p>
+              <div id="envio-campos" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div data-campo="peso">
+                  <label class="lbl" for="peso">Peso (kg) <span class="text-red-600">*</span></label>
+                  <input id="peso" name="peso" class="inp" inputmode="decimal" placeholder="1,5">
+                </div>
+                <div data-campo="alto">
+                  <label class="lbl" for="alto">Alto (cm) <span class="text-red-600">*</span></label>
+                  <input id="alto" name="alto" class="inp" inputmode="decimal" placeholder="20">
+                </div>
+                <div data-campo="ancho">
+                  <label class="lbl" for="ancho">Ancho (cm) <span class="text-red-600">*</span></label>
+                  <input id="ancho" name="ancho" class="inp" inputmode="decimal" placeholder="30">
+                </div>
+                <div data-campo="profundidad">
+                  <label class="lbl" for="profundidad">Profundidad (cm) <span class="text-red-600">*</span></label>
+                  <input id="profundidad" name="profundidad" class="inp" inputmode="decimal" placeholder="30">
+                </div>
+              </div>
+              <p id="envio-servicio" class="hidden text-sm text-slate-600 rounded-xl bg-slate-50 p-3">Los servicios no se envían, así que no hace falta peso ni medidas.</p>
+            </div>
+          </div>
+
+          <!-- ===== PASO 4: opcional ===== -->
+          <h2 class="paso"><span>4</span> Códigos y extras <span class="opc normal-case tracking-normal">(opcional)</span></h2>
+          <div class="card">
+            <h3 class="card-titulo">Códigos</h3>
+            <p class="card-ayuda">La IA lee el número del código de barras de la etiqueta. Si no lo encontró, podés escanearlo.</p>
+            <div class="space-y-4">
+              <div data-campo="codigo">
+                <label class="lbl" for="codigo">Código de barras</label>
+                <div class="flex gap-2">
+                  <div class="relative flex-1 min-w-0">
+                    <input id="codigo" name="codigo" class="inp font-mono pr-10" inputmode="numeric" enterkeyhint="search" placeholder="EAN / UPC" maxlength="14">
+                    <button type="button" id="btn-buscar-codigo" class="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 grid place-items-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Buscar código en catálogos">
+                      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                    </button>
+                  </div>
+                  <button type="button" id="btn-escanear" class="btn-secundario shrink-0">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M11 8v8M14 8v8M17 8v8"/></svg>
+                    <span>Escanear</span>
+                  </button>
+                </div>
+              </div>
+              <div data-campo="sku">
+                <label class="lbl" for="sku">SKU <span class="opc">(código interno)</span></label>
+                <input id="sku" name="sku" class="inp font-mono" autocapitalize="characters" spellcheck="false" placeholder="Si lo dejás vacío se genera solo">
+                <p id="ayuda-sku-variantes" class="ayuda hidden">Como tiene variantes, este queda como código general. Cada variante lleva su propio SKU (si lo dejás vacío, se genera).</p>
+              </div>
+            </div>
           </div>
 
           <!-- Variantes -->
@@ -312,10 +313,10 @@
 
           <!-- Datos internos -->
           <div class="card">
-            <h2 class="card-titulo">Datos internos</h2>
+            <h3 class="card-titulo">Datos internos</h3>
             <p class="card-ayuda">No se muestran en la tienda.</p>
             <div data-campo="proveedor">
-              <label class="lbl" for="proveedor">Proveedor <span class="opc">(si lo tienen)</span></label>
+              <label class="lbl" for="proveedor">Proveedor</label>
               <input id="proveedor" name="proveedor" class="inp">
             </div>
           </div>

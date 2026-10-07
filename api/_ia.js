@@ -25,7 +25,9 @@ Reglas:
 - "categoria": una de estas, o texto vacío si ninguna aplica: ${categorias.join(', ')}.
 - "paraQue": 1 o 2 oraciones claras para el cliente, sin exagerar.
 - "especificaciones" e "incluye": ítems cortos, uno por elemento.
-- "modoUso": resumí las instrucciones impresas si están; si no, texto vacío.`;
+- "modoUso": resumí las instrucciones impresas si están; si no, texto vacío.
+- "codigoBarras": los números impresos debajo del código de barras (EAN/UPC, 8 a 14 dígitos), solo dígitos y solo si se leen completos; si no, texto vacío.
+- "pesoKg", "altoCm", "anchoCm", "profundidadCm": estimación del producto EMBALADO para el envío (como número con punto decimal, ej. "10.5"). Basate en el contenido neto, el tamaño del envase o el tamaño habitual de ese producto. Si no podés estimarlo con criterio, texto vacío.`;
 }
 
 function esquema() {
@@ -36,8 +38,10 @@ function esquema() {
     properties: {
       tipo: texto, marca: texto, modelo: texto, medida: texto, categoria: texto,
       paraQue: texto, especificaciones: lista, modoUso: texto, incluye: lista,
+      codigoBarras: texto, pesoKg: texto, altoCm: texto, anchoCm: texto, profundidadCm: texto,
     },
-    required: ['tipo', 'marca', 'modelo', 'medida', 'categoria', 'paraQue', 'especificaciones', 'modoUso', 'incluye'],
+    required: ['tipo', 'marca', 'modelo', 'medida', 'categoria', 'paraQue', 'especificaciones', 'modoUso', 'incluye',
+      'codigoBarras', 'pesoKg', 'altoCm', 'anchoCm', 'profundidadCm'],
   };
 }
 
@@ -87,7 +91,16 @@ async function leerProducto({ imagenes, codigo, categorias }) {
 
   const limpiar = v => String(v ?? '').replace(/\s+/g, ' ').trim();
   const listar = v => (Array.isArray(v) ? v : []).map(limpiar).filter(Boolean);
+  // Medidas: solo números positivos razonables; si no, vacío.
+  const medida = (v, max) => {
+    const n = parseFloat(String(v ?? '').replace(',', '.'));
+    return Number.isFinite(n) && n > 0 && n <= max ? String(Math.round(n * 100) / 100) : '';
+  };
+  const leido = String(campos.codigoBarras ?? '').replace(/\D/g, '');
   return {
+    codigoBarras: [8, 12, 13, 14].includes(leido.length) ? leido : '',
+    pesoKg: medida(campos.pesoKg, 1000), altoCm: medida(campos.altoCm, 500),
+    anchoCm: medida(campos.anchoCm, 500), profundidadCm: medida(campos.profundidadCm, 500),
     tipo: limpiar(campos.tipo), marca: limpiar(campos.marca), modelo: limpiar(campos.modelo), medida: limpiar(campos.medida),
     categoria: categorias.includes(limpiar(campos.categoria)) ? limpiar(campos.categoria) : '',
     paraQue: limpiar(campos.paraQue), especificaciones: listar(campos.especificaciones),

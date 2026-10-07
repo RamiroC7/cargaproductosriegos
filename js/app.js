@@ -99,6 +99,7 @@
     busqueda = null;
     urlsFotos.forEach(u => URL.revokeObjectURL(u));
     urlsFotos.clear();
+    $('#banner-parecido').classList.add('hidden');
     actual = p;
     const d = p.datos;
     CAMPOS.forEach(n => { form.elements[n].value = d[n] ?? ''; });
@@ -222,7 +223,7 @@
     return llenados;
   }
 
-  // ---------- Completar con IA (lee la foto principal) ----------
+  // ---------- Completar con IA (lee hasta 4 fotos) ----------
   function autocompletarIA(info) {
     const llenados = [];
     const poner = (campo, valor) => ponerSiVacio(campo, valor, llenados);
@@ -231,16 +232,29 @@
     poner('especificaciones', (info.especificaciones || []).join('\n'));
     poner('incluye', (info.incluye || []).join('\n'));
     elegirCategoriaSiVacia(info.categoria, llenados);
+    poner('codigo', info.codigoBarras);
+    // Peso y medidas son estimaciones: quedan en azul para que los confirme.
+    if (!TN.sinEnvio({ categoria: form.elements.categoria.value })) {
+      [['peso', 'pesoKg'], ['alto', 'altoCm'], ['ancho', 'anchoCm'], ['profundidad', 'profundidadCm']]
+        .forEach(([campo, clave]) => poner(campo, (info[clave] || '').replace('.', ',')));
+    }
     actual.datos.fuenteIA = { modelo: info.modelo_ia || null, fecha: new Date().toISOString() };
     actualizarDerivados();
     $$('.autocompletado').forEach(el => el.closest('[data-campo]')?.classList.remove('con-error'));
     return llenados;
   }
 
-  $('#btn-ia').addEventListener('click', async () => {
+  async function productoConCodigo(codigo) {
+    if (!codigo) return null;
+    return (await DB.listar()).find(p => p.id !== actual.id && p.datos.codigo === codigo) || null;
+  }
+
+  let iaEnCurso = false;
+  async function completarConIA() {
     // Primero las de etiqueta (solo IA), que son las que tienen más datos.
     const fotos = [...actual.fotos.filter(f => f.soloIA), ...publicables(actual.fotos)].slice(0, 4);
-    if (!fotos.length) return;
+    if (!fotos.length || iaEnCurso) return;
+    iaEnCurso = true;
     const boton = $('#btn-ia');
     const contenido = boton.innerHTML;
     boton.disabled = true;
@@ -250,17 +264,25 @@
       const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, 1024)));
       const info = await TN.completarConIA(imagenes, form.elements.codigo.value.replace(/\D/g, ''));
       const llenados = autocompletarIA(info);
-      setEstado(llenados.length ? 'completado_automatico' : 'modo_manual', llenados.length
-        ? 'La IA completó lo marcado en azul. Revisalo antes de publicar: puede equivocarse.'
-        : 'La IA no encontró datos nuevos para completar. Probá con una foto donde se lea mejor la etiqueta.');
-      $('[data-campo=codigo]').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const repetido = await productoConCodigo(form.elements.codigo.value);
+      if (repetido) {
+        setEstado('modo_manual', `Ojo: este código de barras ya está cargado en "${TN.titulo(repetido.datos)}". Revisá en Cargados que no sea el mismo producto.`);
+      } else if (llenados.length) {
+        const estimados = ['peso', 'alto', 'ancho', 'profundidad'].some(c => llenados.includes(c));
+        setEstado('completado_automatico', `La IA completó lo marcado en azul. Revisalo${estimados ? ' (el peso y las medidas son estimados: confirmalos)' : ''} y poné precio y cantidad.`);
+      } else {
+        setEstado('modo_manual', 'La IA no encontró datos nuevos para completar. Probá con una foto donde se lea mejor la etiqueta.');
+      }
     } catch (e) {
       setEstado('modo_manual', e.message);
     } finally {
+      iaEnCurso = false;
       boton.disabled = false;
       boton.innerHTML = contenido;
     }
-  });
+  }
+
+  $('#btn-ia').addEventListener('click', completarConIA);
 
   async function buscarCodigo() {
     clearTimeout(timerCodigo);
@@ -274,7 +296,7 @@
     }
 
     // ¿Ya lo cargamos antes?
-    const repetido = (await DB.listar()).find(p => p.id !== actual.id && p.datos.codigo === codigo);
+    const repetido = await productoConCodigo(codigo);
     if (repetido) {
       setEstado('modo_manual', `Este código ya está cargado: "${TN.titulo(repetido.datos)}" (SKU ${repetido.datos.sku || 'sin SKU'}). Revisá la lista de Cargados antes de seguir.`);
       return;
@@ -350,8 +372,11 @@
   }
 
   $$('input[data-fotos]').forEach(input => input.addEventListener('change', async () => {
-    await agregarFotos([...input.files], input.hasAttribute('data-solo-ia'));
+    const soloIA = input.hasAttribute('data-solo-ia');
+    await agregarFotos([...input.files], soloIA);
     input.value = '';
+    // La foto de etiqueta es la señal de "ya está todo para leer": la IA arranca sola.
+    if (soloIA && TN.estado().ia && actual.fotos.some(f => f.soloIA)) completarConIA();
   }));
 
   function renderFotos() {
@@ -571,7 +596,27 @@
 
   // Guarda en el dispositivo (para no perder nada), publica en Tiendanube (producto + fotos),
   // registra en la base interna y deja el formulario limpio para el siguiente escaneo.
+  // SKU automático: si quedó vacío, se usa el código de barras o se genera uno único.
+  // Cuando llegue Contabilium se pueden vincular por código de barras.
+  function completarSkus() {
+    const sku = form.elements.sku;
+    if (!sku.value.trim()) {
+      const codigo = form.elements.codigo.value.replace(/\D/g, '');
+      sku.value = codigo || `RDS-${Date.now().toString(36).toUpperCase()}`;
+    }
+    if (form.elements.tieneVariantes.checked) {
+      let cambio = false;
+      actual.datos.variantes.forEach((v, i) => {
+        if (!(v.sku || '').trim()) { v.sku = `${sku.value.trim()}-${i + 1}`; cambio = true; }
+      });
+      if (cambio) renderVariantes();
+    }
+  }
+
+  let ultimoGuardado = null; // datos del último producto, para "Cargar uno parecido"
+
   async function guardarYPublicar() {
+    completarSkus();
     const errores = await validar();
     mostrarErrores(errores);
     if (errores.length) return;
@@ -603,11 +648,25 @@
       await guardarLocal(p);
     }
 
+    ultimoGuardado = JSON.parse(JSON.stringify(p.datos));
     cargarEnForm(vacio());
+    const banner = $('#banner-parecido');
+    $('p', banner).textContent = `✓ "${TN.titulo(ultimoGuardado)}" ${p.estado === 'publicado' ? 'publicado' : 'guardado'}. ¿El próximo es parecido (otra medida, otro color)?`;
+    banner.classList.remove('hidden');
     window.scrollTo(0, 0);
-    form.elements.codigo.focus({ preventScroll: true });
     aviso(mensaje, tipo);
   }
+
+  // Copia todo del producto anterior menos fotos, códigos y cantidades: solo cambia lo distinto.
+  $('#btn-parecido').addEventListener('click', () => {
+    if (!ultimoGuardado) return;
+    const p = vacio();
+    const { codigo, sku, stock, fuenteCatalogo, fuenteIA, ...resto } = ultimoGuardado;
+    p.datos = { ...p.datos, ...resto, variantes: (resto.variantes || []).map(v => ({ ...v, id: nuevoId(), sku: '', stock: '' })) };
+    cargarEnForm(p);
+    window.scrollTo(0, 0);
+    aviso('Datos copiados del producto anterior. Sacá las fotos y cambiá lo que sea distinto.');
+  });
 
   $('#btn-borrador').addEventListener('click', guardarBorrador);
   $('#btn-listo').addEventListener('click', guardarYPublicar);
