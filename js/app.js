@@ -252,7 +252,8 @@
   let iaEnCurso = false;
   async function completarConIA() {
     // Primero las de etiqueta (solo IA), que son las que tienen más datos.
-    const fotos = [...actual.fotos.filter(f => f.soloIA), ...publicables(actual.fotos)].slice(0, 4);
+    // Hasta 3 fotos: menos datos = respuesta más rápida.
+    const fotos = [...actual.fotos.filter(f => f.soloIA), ...publicables(actual.fotos)].slice(0, 3);
     if (!fotos.length || iaEnCurso) return;
     iaEnCurso = true;
     const boton = $('#btn-ia');
@@ -261,7 +262,8 @@
     boton.innerHTML = `${SPINNER}Leyendo ${fotos.length === 1 ? 'la foto' : 'las fotos'}…`;
     setEstado('buscando_info', `La IA está leyendo ${fotos.length === 1 ? 'la foto' : `las ${fotos.length} fotos`}…`);
     try {
-      const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, 1024)));
+      // La etiqueta va nítida para que se lea la letra chica; la foto del producto alcanza más chica.
+      const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, f.soloIA ? 1024 : 640)));
       const info = await TN.completarConIA(imagenes, form.elements.codigo.value.replace(/\D/g, ''));
       const llenados = autocompletarIA(info);
       const repetido = await productoConCodigo(form.elements.codigo.value);

@@ -11,8 +11,8 @@
 const MODELO = () => process.env.GEMINI_MODELO || 'gemini-3.8-flash';
 // Si el modelo principal está saturado, se prueba con estos (también gratis), en orden.
 const RESPALDOS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
-const TIMEOUT_MS = 20000;
-const esperar = ms => new Promise(r => setTimeout(r, ms));
+const TIMEOUT_MS = 45000; // tope por modelo
+const ESCALON_MS = 6000;  // si un modelo no respondió en este tiempo, arranca el siguiente en paralelo
 
 const iaConfigurada = () => !!process.env.GEMINI_API_KEY;
 
@@ -52,7 +52,8 @@ function esquema() {
 async function leerProducto({ imagenes, codigo, categorias }) {
   if (!iaConfigurada()) throw Object.assign(new Error('La IA todavía no está configurada en el servidor.'), { status: 503 });
 
-  const cuerpo = JSON.stringify({
+  // Para leer una etiqueta alcanza con "pensar poco": responde bastante más rápido.
+  const armarCuerpo = pensarPoco => JSON.stringify({
     contents: [{
       role: 'user',
       parts: [
@@ -60,39 +61,85 @@ async function leerProducto({ imagenes, codigo, categorias }) {
         ...imagenes.map(data => ({ inline_data: { mime_type: 'image/jpeg', data } })),
       ],
     }],
-    generationConfig: { responseMimeType: 'application/json', responseSchema: esquema(), temperature: 0.2 },
+    generationConfig: {
+      responseMimeType: 'application/json', responseSchema: esquema(), temperature: 0.2,
+      ...(pensarPoco ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
+    },
   });
+  const cuerpoRapido = armarCuerpo(true), cuerpoNormal = armarCuerpo(false);
 
-  // Saturado (503/500), límite del modelo (429), modelo no disponible para la cuenta (404) o demora:
-  // se pasa al siguiente modelo.
-  // Cualquier otro error (key inválida, pedido mal armado) corta en el acto.
-  const modelos = [...new Set([MODELO(), ...RESPALDOS])];
-  let datos = null, modeloUsado = null, ultimo = null;
-  for (const [i, modelo] of modelos.entries()) {
-    if (i > 0) await esperar(800);
-    let r;
+  const intentos = []; // queda en los registros de Vercel para saber por qué falló cada modelo
+  const controles = [];
+  let resuelto = false;
+
+  async function llamar(modelo, cuerpo) {
+    const control = new AbortController();
+    controles.push(control);
+    const reloj = setTimeout(() => control.abort(), TIMEOUT_MS);
+    const t0 = Date.now();
     try {
-      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`, {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
         body: cuerpo,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: control.signal,
       });
-    } catch (e) {
-      ultimo = e.name === 'TimeoutError' ? { status: 504, motivo: 'tardó demasiado' } : { status: 502, motivo: 'no se pudo conectar' };
-      continue;
-    }
-    const json = await r.json().catch(() => ({}));
-    if (r.ok) { datos = json; modeloUsado = modelo; break; }
-    ultimo = { status: r.status, motivo: json?.error?.message || `error ${r.status}` };
-    if (![404, 429, 500, 503].includes(r.status)) {
-      throw Object.assign(new Error(`La IA respondió ${r.status}: ${ultimo.motivo}`), { status: 502 });
+      return { modelo, status: r.status, json: await r.json().catch(() => ({})), ms: Date.now() - t0 };
+    } catch {
+      // Cortado por demora, o porque otro modelo ya respondió.
+      return { modelo, status: resuelto ? 0 : 504, json: {}, ms: Date.now() - t0 };
+    } finally {
+      clearTimeout(reloj);
     }
   }
+
+  async function intentar(modelo) {
+    let r = await llamar(modelo, cuerpoRapido);
+    // Si el modelo no acepta el ajuste de "pensar poco", se repite sin él.
+    if (r.status === 400 && /think/i.test(r.json?.error?.message || '')) r = await llamar(modelo, cuerpoNormal);
+    if (r.status !== 0) {
+      intentos.push({ modelo, status: r.status, ms: r.ms, motivo: r.status === 200 ? 'ok' : r.status === 504 ? 'tardó demasiado' : (r.json?.error?.message || '').slice(0, 160) });
+    }
+    return r;
+  }
+
+  // Los modelos compiten en vez de esperar en fila: arranca el principal; si a los pocos segundos
+  // no respondió (o falló), arranca el siguiente, y se queda con la primera respuesta buena.
+  // Saturado (503/500), límite (429), no disponible (404) o demora: se sigue con otro.
+  // Cualquier otro error (key inválida, pedido mal armado) corta en el acto.
+  const modelos = [...new Set([MODELO(), ...RESPALDOS])];
+  const ganador = await new Promise(resolver => {
+    let lanzados = 0, terminados = 0;
+    const terminar = valor => { if (!resuelto) { resuelto = true; clearInterval(escalonado); controles.forEach(c => c.abort()); resolver(valor); } };
+    const lanzar = () => {
+      if (resuelto || lanzados >= modelos.length) return;
+      const modelo = modelos[lanzados++];
+      intentar(modelo).then(r => {
+        terminados++;
+        if (r.status === 200) return terminar(r);
+        if (r.status !== 0 && ![404, 429, 500, 503, 504].includes(r.status)) return terminar(r); // error de fondo
+        if (lanzados < modelos.length) lanzar();
+        else if (terminados >= lanzados) terminar(null);
+      });
+    };
+    const escalonado = setInterval(lanzar, ESCALON_MS);
+    lanzar();
+  });
+  console.log('IA intentos', JSON.stringify(intentos));
+
+  if (ganador && ganador.status !== 200) {
+    throw Object.assign(new Error(`La IA respondió ${ganador.status}: ${ganador.json?.error?.message || 'error desconocido'}`), { status: 502 });
+  }
+  const datos = ganador?.json || null, modeloUsado = ganador?.modelo || null;
+  // El motivo a mostrar: si algún modelo dijo "límite de uso", ese; si no, el último fallo.
+  let ultimo = intentos.find(x => x.status === 429) || intentos.at(-1) || null;
 
   if (!datos) {
     if (ultimo?.status === 429) {
       throw Object.assign(new Error('Se alcanzó el límite de uso gratis de la IA. Esperá un minuto (o hasta mañana si es el límite diario) y probá de nuevo.'), { status: 429 });
+    }
+    if (intentos.length && intentos.every(x => x.status === 504)) {
+      throw Object.assign(new Error('La IA tardó demasiado en responder. Probá con menos fotos o de nuevo en unos minutos.'), { status: 504 });
     }
     if (ultimo?.status === 404) {
       throw Object.assign(new Error(`Ningún modelo de IA está disponible para esta cuenta de Google (${ultimo.motivo}). Avisale al administrador.`), { status: 502 });
