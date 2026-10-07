@@ -10,7 +10,7 @@
 
 const MODELO = () => process.env.GEMINI_MODELO || 'gemini-3.8-flash';
 // Si el modelo principal está saturado, se prueba con estos (también gratis), en orden.
-const RESPALDOS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const RESPALDOS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
 const TIMEOUT_MS = 20000;
 const esperar = ms => new Promise(r => setTimeout(r, ms));
 
@@ -63,7 +63,8 @@ async function leerProducto({ imagenes, codigo, categorias }) {
     generationConfig: { responseMimeType: 'application/json', responseSchema: esquema(), temperature: 0.2 },
   });
 
-  // Saturado (503/500), límite del modelo (429) o demora: se pasa al siguiente modelo.
+  // Saturado (503/500), límite del modelo (429), modelo no disponible para la cuenta (404) o demora:
+  // se pasa al siguiente modelo.
   // Cualquier otro error (key inválida, pedido mal armado) corta en el acto.
   const modelos = [...new Set([MODELO(), ...RESPALDOS])];
   let datos = null, modeloUsado = null, ultimo = null;
@@ -84,7 +85,7 @@ async function leerProducto({ imagenes, codigo, categorias }) {
     const json = await r.json().catch(() => ({}));
     if (r.ok) { datos = json; modeloUsado = modelo; break; }
     ultimo = { status: r.status, motivo: json?.error?.message || `error ${r.status}` };
-    if (![429, 500, 503].includes(r.status)) {
+    if (![404, 429, 500, 503].includes(r.status)) {
       throw Object.assign(new Error(`La IA respondió ${r.status}: ${ultimo.motivo}`), { status: 502 });
     }
   }
@@ -92,6 +93,9 @@ async function leerProducto({ imagenes, codigo, categorias }) {
   if (!datos) {
     if (ultimo?.status === 429) {
       throw Object.assign(new Error('Se alcanzó el límite de uso gratis de la IA. Esperá un minuto (o hasta mañana si es el límite diario) y probá de nuevo.'), { status: 429 });
+    }
+    if (ultimo?.status === 404) {
+      throw Object.assign(new Error(`Ningún modelo de IA está disponible para esta cuenta de Google (${ultimo.motivo}). Avisale al administrador.`), { status: 502 });
     }
     throw Object.assign(new Error('La IA de Google está saturada en este momento. Probá de nuevo en unos minutos o completá los datos a mano.'), { status: 503 });
   }
