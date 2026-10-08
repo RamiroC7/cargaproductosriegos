@@ -355,7 +355,10 @@
 
   async function agregarFotos(archivos, soloIA = false) {
     if (!archivos.length) return;
-    $('#fotos-procesando').classList.remove('hidden');
+    const hayHEIC = archivos.some(a => /\.(heic|heif)$/i.test(a.name || '') || a.type === 'image/heic' || a.type === 'image/heif');
+    const procesando = $('#fotos-procesando');
+    procesando.textContent = hayHEIC ? 'Convirtiendo fotos HEIC… puede tardar unos segundos' : 'Procesando fotos…';
+    procesando.classList.remove('hidden');
     const errores = [];
     for (const archivo of archivos) {
       try {
@@ -365,7 +368,7 @@
         errores.push(e.message);
       }
     }
-    $('#fotos-procesando').classList.add('hidden');
+    procesando.classList.add('hidden');
     renderFotos();
     if (publicables(actual.fotos).length >= C.FOTOS_MINIMO) $('[data-campo=fotos]').classList.remove('con-error');
     if (errores.length) aviso(errores.join('\n'), 'error');
