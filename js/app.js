@@ -564,8 +564,17 @@
     caja.innerHTML = `<p class="font-semibold mb-1">Antes de publicar falta completar:</p>
       <ul class="list-disc pl-5 space-y-0.5">${errores.map(e => `<li>${esc(e.msg)}</li>`).join('')}</ul>`;
     caja.classList.remove('hidden');
-    caja.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    caja.focus({ preventScroll: true });
+
+    // Toast flotante visible inmediatamente en mobile para que el usuario sepa qué pasó
+    const primerError = errores[0]?.msg || 'Faltan completar campos obligatorios.';
+    aviso(`⚠️ No se pudo publicar:\n${primerError}${errores.length > 1 ? ` (y ${errores.length - 1} más arriba)` : ''}`, 'error');
+
+    // Desplazar la vista al primer campo con error o a la caja de errores
+    const primerElemento = $(`[data-campo="${errores[0]?.campo}"]`) || caja;
+    primerElemento.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const foco = primerElemento.querySelector('input, select, textarea');
+    if (foco) foco.focus({ preventScroll: true });
+    else caja.focus({ preventScroll: true });
   }
 
   // ---------- Guardar ----------
@@ -619,45 +628,50 @@
   let ultimoGuardado = null; // datos del último producto, para "Cargar uno parecido"
 
   async function guardarYPublicar() {
-    completarSkus();
-    const errores = await validar();
-    mostrarErrores(errores);
-    if (errores.length) return;
-
-    const p = actual;
-    setEstado('guardando', 'Guardando…');
-    p.estado = 'listo';
     try {
-      await guardarLocal(p);
-    } catch (e) {
-      setEstado('inicial');
-      aviso('No se pudo guardar en este dispositivo: ' + e.message, 'error');
-      return;
-    }
+      completarSkus();
+      const errores = await validar();
+      mostrarErrores(errores);
+      if (errores.length) return;
 
-    let mensaje = 'Guardado en este dispositivo. Se publica cuando se conecte Tiendanube.';
-    let tipo = 'ok';
-    if (TN.conectado()) {
+      const p = actual;
+      setEstado('guardando', 'Guardando…');
+      p.estado = 'listo';
       try {
-        await TN.publicar(p, texto => setEstado('guardando', texto));
-        p.estado = 'publicado';
-        p.tnError = null;
-        mensaje = 'Publicado en Tiendanube ✓';
+        await guardarLocal(p);
       } catch (e) {
-        p.tnError = e.message;
-        mensaje = `Quedó guardado pero no se pudo publicar: ${e.message}\nLo podés reintentar desde Cargados.`;
-        tipo = 'error';
+        setEstado('inicial');
+        aviso('No se pudo guardar en este dispositivo: ' + e.message, 'error');
+        return;
       }
-      await guardarLocal(p);
-    }
 
-    ultimoGuardado = JSON.parse(JSON.stringify(p.datos));
-    cargarEnForm(vacio());
-    const banner = $('#banner-parecido');
-    $('p', banner).textContent = `✓ "${TN.titulo(ultimoGuardado)}" ${p.estado === 'publicado' ? 'publicado' : 'guardado'}. ¿El próximo es parecido (otra medida, otro color)?`;
-    banner.classList.remove('hidden');
-    window.scrollTo(0, 0);
-    aviso(mensaje, tipo);
+      let mensaje = 'Guardado en este dispositivo. Se publica cuando se conecte Tiendanube.';
+      let tipo = 'ok';
+      if (TN.conectado()) {
+        try {
+          await TN.publicar(p, texto => setEstado('guardando', texto));
+          p.estado = 'publicado';
+          p.tnError = null;
+          mensaje = 'Publicado en Tiendanube ✓';
+        } catch (e) {
+          p.tnError = e.message;
+          mensaje = `Quedó guardado pero no se pudo publicar: ${e.message}\nLo podés reintentar desde Cargados.`;
+          tipo = 'error';
+        }
+        await guardarLocal(p);
+      }
+
+      ultimoGuardado = JSON.parse(JSON.stringify(p.datos));
+      cargarEnForm(vacio());
+      const banner = $('#banner-parecido');
+      $('p', banner).textContent = `✓ "${TN.titulo(ultimoGuardado)}" ${p.estado === 'publicado' ? 'publicado' : 'guardado'}. ¿El próximo es parecido (otra medida, otro color)?`;
+      banner.classList.remove('hidden');
+      window.scrollTo(0, 0);
+      aviso(mensaje, tipo);
+    } catch (errInesperado) {
+      setEstado('inicial');
+      aviso('Ocurrió un error al intentar guardar: ' + (errInesperado.message || errInesperado), 'error');
+    }
   }
 
   // Copia todo del producto anterior menos fotos, códigos y cantidades: solo cambia lo distinto.
