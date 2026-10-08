@@ -15,16 +15,29 @@ window.Imagenes = (() => {
   // Convierte un archivo HEIC/HEIF a un Blob JPEG usando heic2any.
   async function convertirHEIC(archivo) {
     if (typeof heic2any === 'undefined') {
-      throw new Error('No se pudo cargar la librería para abrir fotos HEIC. Recargá la página e intentá de nuevo.');
+      throw new Error('No se pudo cargar la librería para abrir fotos HEIC. Verificá tu conexión o recargá la página.');
     }
-    const resultado = await heic2any({ blob: archivo, toType: 'image/jpeg', quality: 0.92 });
-    // heic2any puede devolver un Blob o un array de Blobs (para HEIF multi-imagen).
-    return Array.isArray(resultado) ? resultado[0] : resultado;
+    try {
+      const resultado = await heic2any({
+        blob: archivo,
+        toType: 'image/jpeg',
+        quality: 0.90,
+      });
+      // heic2any puede devolver un Blob o un array de Blobs (para HEIF multi-imagen).
+      return Array.isArray(resultado) ? resultado[0] : resultado;
+    } catch (err) {
+      console.error('Error al convertir HEIC:', err);
+      const detalle = err?.message || (typeof err === 'string' ? err : JSON.stringify(err));
+      throw new Error(`No se pudo convertir la foto HEIC "${archivo.name || 'foto'}": ${detalle}`);
+    }
   }
 
   async function cargar(archivo) {
     // Si es HEIC, convertir a JPEG antes de intentar decodificarlo.
-    if (esHEIC(archivo)) archivo = await convertirHEIC(archivo);
+    if (esHEIC(archivo)) {
+      const blobJpg = await convertirHEIC(archivo);
+      archivo = new File([blobJpg], (archivo.name || 'foto.heic').replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+    }
 
     if (window.createImageBitmap) {
       try {
@@ -41,7 +54,10 @@ window.Imagenes = (() => {
 
   async function procesar(archivo, { soloIA = false } = {}) {
     // Convertir HEIC antes de cualquier procesamiento.
-    if (esHEIC(archivo)) archivo = new File([await convertirHEIC(archivo)], archivo.name.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg'), { type: 'image/jpeg' });
+    if (esHEIC(archivo)) {
+      const blobJpg = await convertirHEIC(archivo);
+      archivo = new File([blobJpg], (archivo.name || 'foto.heic').replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+    }
 
     // Las fotos solo para la IA no se publican: no hace falta que sean cuadradas ni grandes.
     if (soloIA) return { blob: await achicar(archivo, 1600), cuadrada: true };
@@ -81,8 +97,10 @@ window.Imagenes = (() => {
 
   // Copia achicada en JPG, sin cambiar la proporción.
   async function achicar(blob, lado) {
-    // Si el blob es HEIC, convertir primero.
-    if (esHEIC(blob)) blob = await convertirHEIC(blob);
+    if (esHEIC(blob)) {
+      const blobJpg = await convertirHEIC(blob);
+      blob = new File([blobJpg], (blob.name || 'foto.heic').replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+    }
 
     const img = await cargar(blob);
     const escala = Math.min(1, lado / Math.max(img.width, img.height));
