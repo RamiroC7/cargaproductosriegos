@@ -9,9 +9,9 @@
 //   ANTHROPIC_API_KEY  Claude (Anthropic, pago).      Modelo: CLAUDE_MODELO (def. 'claude-opus-5-5').
 //
 // Orden: primero Gemini; si falla o tarda, entran las demás de la más barata a la más cara.
-// Si una IA falla, arranca la siguiente. Si una no respondió en ESCALON_MS, arranca en paralelo la próxima
-// de OTRA empresa (nunca dos de la misma a la vez: se cobra cada pedido aunque su respuesta se descarte).
-// Gana la primera respuesta buena. El error de una nunca frena a las otras.
+// Las IAs compiten en vez de esperar en fila: si una no respondió en ESCALON_MS (o falló), arranca la
+// siguiente en paralelo, y gana la primera respuesta buena. El error de una nunca frena a las otras.
+// Se prioriza la velocidad: si dos responden, se pagan las dos (son centavos).
 //
 // Nota: en el plan gratis Google puede usar lo que se envía para mejorar sus productos.
 // Acá solo viajan fotos de envases y etiquetas, no datos de clientes.
@@ -19,7 +19,7 @@ const AnthropicSDK = require('@anthropic-ai/sdk');
 const Anthropic = AnthropicSDK.default || AnthropicSDK;
 
 const TIMEOUT_MS = 45000; // tope por IA
-const ESCALON_MS = 6000;  // si una IA no respondió en este tiempo, arranca en paralelo una de otra empresa
+const ESCALON_MS = 6000;  // si una IA no respondió en este tiempo, arranca la siguiente en paralelo
 
 const env = (nombre, porDefecto) => process.env[nombre] || porDefecto;
 const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.MISTRAL_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
@@ -251,8 +251,7 @@ async function leerProducto({ imagenes, codigo, categorias }) {
     }
 
     return new Promise(resolver => {
-      const pendientes = [...lista];
-      const enCurso = []; // empresas con un pedido en vuelo
+      let lanzadas = 0, terminadas = 0;
       const terminar = valor => {
         if (resuelto) return;
         resuelto = true;
@@ -260,18 +259,14 @@ async function leerProducto({ imagenes, codigo, categorias }) {
         controles.forEach(c => c.abort());
         resolver(valor);
       };
-      // Arranca la próxima IA de la lista cuya empresa no tenga ya un pedido esperando.
       const lanzar = () => {
-        if (resuelto) return;
-        const i = pendientes.findIndex(x => !enCurso.includes(x.empresa));
-        if (i < 0) return;
-        const [ia] = pendientes.splice(i, 1);
-        enCurso.push(ia.empresa);
+        if (resuelto || lanzadas >= lista.length) return;
+        const ia = lista[lanzadas++];
         intentar(ia).then(r => {
-          enCurso.splice(enCurso.indexOf(ia.empresa), 1);
+          terminadas++;
           if (r.status === 200) return terminar(r);
-          lanzar();
-          if (!enCurso.length) terminar(null);
+          if (lanzadas < lista.length) lanzar();
+          else if (terminadas >= lanzadas) terminar(null);
         });
       };
       const escalonado = setInterval(lanzar, ESCALON_MS);
