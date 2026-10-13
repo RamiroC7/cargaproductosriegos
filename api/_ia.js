@@ -20,6 +20,9 @@ const Anthropic = AnthropicSDK.default || AnthropicSDK;
 
 const TIMEOUT_MS = 45000; // tope por IA
 const ESCALON_MS = 6000;  // si una IA no respondió en este tiempo, arranca la siguiente en paralelo
+const REINTENTOS = 3;                // veces que se prueba una IA que dice "saturada"
+const PAUSA_REINTENTO_MS = 2500;     // espera antes de volver a probarla
+const PLAZO_REINTENTOS_MS = 50000;   // pasado este tiempo desde el inicio ya no se reintenta
 
 const env = (nombre, porDefecto) => process.env[nombre] || porDefecto;
 const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.MISTRAL_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
@@ -227,12 +230,14 @@ async function leerProducto({ imagenes, codigo, categorias }) {
   const intentos = []; // queda en los registros de Vercel para saber qué pasó con cada IA
   const inicio = Date.now();
 
-  // Una "ronda": las IAs de la lista compiten y gana la primera respuesta buena (null si ninguna).
-  function ronda(lista, numero) {
+  // Las IAs compiten y gana la primera respuesta buena (null si ninguna).
+  // Si una dice "saturada" (500/503), se la vuelve a probar a los pocos segundos mientras quede tiempo:
+  // los picos de demanda de Google suelen durar segundos y esos rechazos no se cobran.
+  function competir(lista) {
     const controles = [];
     let resuelto = false;
 
-    async function intentar(ia) {
+    async function intentar(ia, numero) {
       const control = new AbortController();
       controles.push(control);
       const reloj = setTimeout(() => control.abort(), TIMEOUT_MS);
@@ -246,27 +251,38 @@ async function leerProducto({ imagenes, codigo, categorias }) {
       } finally {
         clearTimeout(reloj);
       }
-      if (r.status !== 0) intentos.push({ ronda: numero, ia: ia.nombre, status: r.status, ms: Date.now() - t0, motivo: r.status === 200 ? 'ok' : String(r.motivo || '').slice(0, 160) });
+      if (r.status !== 0) intentos.push({ vez: numero, ia: ia.nombre, status: r.status, ms: Date.now() - t0, motivo: r.status === 200 ? 'ok' : String(r.motivo || '').slice(0, 160) });
       return { ...r, ia: ia.nombre };
     }
 
     return new Promise(resolver => {
-      let lanzadas = 0, terminadas = 0;
+      const pendientes = lista.map(ia => ({ ia, vez: 1 }));
+      let activas = 0; // pedidos en vuelo + reintentos esperando su turno
+      const relojes = [];
       const terminar = valor => {
         if (resuelto) return;
         resuelto = true;
         clearInterval(escalonado);
+        relojes.forEach(clearTimeout);
         controles.forEach(c => c.abort());
         resolver(valor);
       };
       const lanzar = () => {
-        if (resuelto || lanzadas >= lista.length) return;
-        const ia = lista[lanzadas++];
-        intentar(ia).then(r => {
-          terminadas++;
+        if (resuelto || !pendientes.length) return;
+        const { ia, vez } = pendientes.shift();
+        activas++;
+        intentar(ia, vez).then(r => {
           if (r.status === 200) return terminar(r);
-          if (lanzadas < lista.length) lanzar();
-          else if (terminadas >= lanzadas) terminar(null);
+          const saturada = r.status === 503 || r.status === 500;
+          if (saturada && vez < REINTENTOS && Date.now() - inicio < PLAZO_REINTENTOS_MS) {
+            // Vuelve a la fila después de una pausa; mientras tanto siguen las demás.
+            relojes.push(setTimeout(() => { activas--; pendientes.push({ ia, vez: vez + 1 }); lanzar(); }, PAUSA_REINTENTO_MS));
+            lanzar();
+            return;
+          }
+          activas--;
+          lanzar();
+          if (!activas && !pendientes.length) terminar(null);
         });
       };
       const escalonado = setInterval(lanzar, ESCALON_MS);
@@ -274,14 +290,7 @@ async function leerProducto({ imagenes, codigo, categorias }) {
     });
   }
 
-  let ganador = await ronda(ias, 1);
-  // La saturación suele durar segundos: si alguna IA dijo "saturada", se espera un poco
-  // y se prueba de nuevo solo con las que dijeron eso.
-  const saturadas = ias.filter(x => intentos.some(i => i.ia === x.nombre && (i.status === 503 || i.status === 500)));
-  if (!ganador && Date.now() - inicio < 30000 && saturadas.length) {
-    await new Promise(r => setTimeout(r, 4000));
-    ganador = await ronda(saturadas, 2);
-  }
+  const ganador = await competir(ias);
   console.log('IA intentos', JSON.stringify(intentos));
 
   if (!ganador) {
@@ -294,6 +303,9 @@ async function leerProducto({ imagenes, codigo, categorias }) {
           ? 'Se hicieron muchos pedidos seguidos a la IA. Esperá un minuto y probá de nuevo.'
           : 'Se alcanzó el límite de uso de la IA. Esperá un minuto y probá de nuevo; si sigue, revisá el plan y la facturación en Google AI Studio.';
       throw Object.assign(new Error(msj), { status: 429 });
+    }
+    if (soloGoogle && intentos.some(x => x.status === 402)) {
+      throw Object.assign(new Error('Se terminó el crédito de la IA de Google. Hay que cargar saldo en Google AI Studio (ai.studio/projects).'), { status: 402 });
     }
     if (intentos.length && intentos.every(x => x.status === 504)) {
       throw Object.assign(new Error('La IA tardó demasiado en responder. Probá con menos fotos o de nuevo en unos minutos.'), { status: 504 });
