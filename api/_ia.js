@@ -8,9 +8,10 @@
 //   XAI_API_KEY        Grok (xAI, pago).              Modelo: XAI_MODELO    (def. 'grok-4.7').
 //   ANTHROPIC_API_KEY  Claude (Anthropic, pago).      Modelo: CLAUDE_MODELO (def. 'claude-opus-5-5').
 //
-// Orden: primero Gemini (gratis); si está saturado o tarda, entran las pagas de la más barata a la más cara.
-// Las IAs compiten en vez de esperar en fila: si una no respondió en ESCALON_MS (o falló), arranca la
-// siguiente en paralelo, y gana la primera respuesta buena. El error de una nunca frena a las otras.
+// Orden: primero Gemini; si falla o tarda, entran las demás de la más barata a la más cara.
+// Si una IA falla, arranca la siguiente. Si una no respondió en ESCALON_MS, arranca en paralelo la próxima
+// de OTRA empresa (nunca dos de la misma a la vez: se cobra cada pedido aunque su respuesta se descarte).
+// Gana la primera respuesta buena. El error de una nunca frena a las otras.
 //
 // Nota: en el plan gratis Google puede usar lo que se envía para mejorar sus productos.
 // Acá solo viajan fotos de envases y etiquetas, no datos de clientes.
@@ -18,11 +19,10 @@ const AnthropicSDK = require('@anthropic-ai/sdk');
 const Anthropic = AnthropicSDK.default || AnthropicSDK;
 
 const TIMEOUT_MS = 45000; // tope por IA
-const ESCALON_MS = 6000;  // si una IA no respondió en este tiempo, arranca la siguiente en paralelo
+const ESCALON_MS = 6000;  // si una IA no respondió en este tiempo, arranca en paralelo una de otra empresa
 
 const env = (nombre, porDefecto) => process.env[nombre] || porDefecto;
 const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.MISTRAL_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
-const esGratis = nombre => nombre.startsWith('gemini') || nombre.startsWith('mistral') || nombre.startsWith('ministral');
 
 function instrucciones(categorias, codigo) {
   return `Sos asistente de carga de productos de "Riegos del Sur", un comercio argentino de piletas, riego, jardín, vivero, herramientas y muebles de exterior.
@@ -67,9 +67,14 @@ function esquemaGemini() {
 
 async function leerJson(r) { return r.json().catch(() => ({})); }
 
+// Google explica en error.details qué límite se pasó (ej. "GenerateRequestsPerDayPerProjectPerModel-FreeTier").
+const limiteGemini = json => (json?.error?.details || [])
+  .flatMap(d => d.violations || []).map(v => v.quotaId).filter(Boolean).join(', ');
+
 function gemini(modelo) {
   return {
     nombre: modelo,
+    empresa: 'google',
     async pedir({ prompt, imagenes, signal }) {
       const cuerpo = pensarPoco => JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }, ...imagenes.map(data => ({ inline_data: { mime_type: 'image/jpeg', data } }))] }],
@@ -89,7 +94,10 @@ function gemini(modelo) {
       let { r, json } = await llamar(true);
       // Si el modelo no acepta el ajuste de "pensar poco", se repite sin él.
       if (r.status === 400 && /think/i.test(json?.error?.message || '')) ({ r, json } = await llamar(false));
-      if (!r.ok) return { status: r.status, motivo: json?.error?.message };
+      if (!r.ok) {
+        const limite = r.status === 429 ? limiteGemini(json) : '';
+        return { status: r.status, motivo: limite ? `límite: ${limite}` : json?.error?.message };
+      }
       const c = json.candidates?.[0];
       const texto = (c?.content?.parts || []).map(p => p.text || '').join('');
       return texto ? { status: 200, texto } : { status: 502, motivo: `sin datos (${c?.finishReason || json.promptFeedback?.blockReason || 'vacío'})` };
@@ -98,9 +106,10 @@ function gemini(modelo) {
 }
 
 // OpenAI y Grok usan el mismo formato de "chat completions".
-function compatibleOpenAI(nombre, url, key, modelo) {
+function compatibleOpenAI(empresa, nombre, url, key, modelo) {
   return {
     nombre,
+    empresa,
     async pedir({ prompt, imagenes, signal }) {
       const r = await fetch(url, {
         method: 'POST',
@@ -130,6 +139,7 @@ function compatibleOpenAI(nombre, url, key, modelo) {
 function mistral(modelo) {
   return {
     nombre: modelo,
+    empresa: 'mistral',
     async pedir({ prompt, imagenes, signal }) {
       const llamar = formato => fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
@@ -163,6 +173,7 @@ function claude(modelo) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   return {
     nombre: modelo,
+    empresa: 'anthropic',
     async pedir({ prompt, imagenes, signal }) {
       try {
         const respuesta = await client.beta.messages.create({
@@ -199,8 +210,8 @@ function candidatas() {
   const geminiPrincipal = env('GEMINI_MODELO', 'gemini-3.8-flash');
   if (process.env.GEMINI_API_KEY) lista.push(gemini(geminiPrincipal), gemini('gemini-3.6-flash'));
   if (process.env.MISTRAL_API_KEY) lista.push(mistral(env('MISTRAL_MODELO', 'mistral-small-latest')));
-  if (process.env.OPENAI_API_KEY) lista.push(compatibleOpenAI(env('OPENAI_MODELO', 'gpt-6-luna'), 'https://api.openai.com/v1/chat/completions', process.env.OPENAI_API_KEY, env('OPENAI_MODELO', 'gpt-6-luna')));
-  if (process.env.XAI_API_KEY) lista.push(compatibleOpenAI(env('XAI_MODELO', 'grok-4.7'), 'https://api.x.ai/v1/chat/completions', process.env.XAI_API_KEY, env('XAI_MODELO', 'grok-4.7')));
+  if (process.env.OPENAI_API_KEY) lista.push(compatibleOpenAI('openai', env('OPENAI_MODELO', 'gpt-6-luna'), 'https://api.openai.com/v1/chat/completions', process.env.OPENAI_API_KEY, env('OPENAI_MODELO', 'gpt-6-luna')));
+  if (process.env.XAI_API_KEY) lista.push(compatibleOpenAI('xai', env('XAI_MODELO', 'grok-4.7'), 'https://api.x.ai/v1/chat/completions', process.env.XAI_API_KEY, env('XAI_MODELO', 'grok-4.7')));
   if (process.env.ANTHROPIC_API_KEY) lista.push(claude(env('CLAUDE_MODELO', 'claude-opus-5-5')));
   if (process.env.GEMINI_API_KEY) lista.push(gemini('gemini-3.7-flash'), gemini('gemini-3.5-flash'));
   // Sin repetidos (por si GEMINI_MODELO coincide con un respaldo).
@@ -240,7 +251,8 @@ async function leerProducto({ imagenes, codigo, categorias }) {
     }
 
     return new Promise(resolver => {
-      let lanzadas = 0, terminadas = 0;
+      const pendientes = [...lista];
+      const enCurso = []; // empresas con un pedido en vuelo
       const terminar = valor => {
         if (resuelto) return;
         resuelto = true;
@@ -248,14 +260,18 @@ async function leerProducto({ imagenes, codigo, categorias }) {
         controles.forEach(c => c.abort());
         resolver(valor);
       };
+      // Arranca la próxima IA de la lista cuya empresa no tenga ya un pedido esperando.
       const lanzar = () => {
-        if (resuelto || lanzadas >= lista.length) return;
-        const ia = lista[lanzadas++];
+        if (resuelto) return;
+        const i = pendientes.findIndex(x => !enCurso.includes(x.empresa));
+        if (i < 0) return;
+        const [ia] = pendientes.splice(i, 1);
+        enCurso.push(ia.empresa);
         intentar(ia).then(r => {
-          terminadas++;
+          enCurso.splice(enCurso.indexOf(ia.empresa), 1);
           if (r.status === 200) return terminar(r);
-          if (lanzadas < lista.length) lanzar();
-          else if (terminadas >= lanzadas) terminar(null);
+          lanzar();
+          if (!enCurso.length) terminar(null);
         });
       };
       const escalonado = setInterval(lanzar, ESCALON_MS);
@@ -264,19 +280,25 @@ async function leerProducto({ imagenes, codigo, categorias }) {
   }
 
   let ganador = await ronda(ias, 1);
-  // La saturación de las IAs gratis suele durar segundos: si todas dijeron "saturada" rápido,
-  // se espera un poco y se prueba de nuevo solo con las gratis.
-  if (!ganador && Date.now() - inicio < 30000 && intentos.some(x => x.status === 503 || x.status === 500)) {
+  // La saturación suele durar segundos: si alguna IA dijo "saturada", se espera un poco
+  // y se prueba de nuevo solo con las que dijeron eso.
+  const saturadas = ias.filter(x => intentos.some(i => i.ia === x.nombre && (i.status === 503 || i.status === 500)));
+  if (!ganador && Date.now() - inicio < 30000 && saturadas.length) {
     await new Promise(r => setTimeout(r, 4000));
-    ganador = await ronda(ias.filter(x => esGratis(x.nombre)), 2);
+    ganador = await ronda(saturadas, 2);
   }
   console.log('IA intentos', JSON.stringify(intentos));
 
   if (!ganador) {
-    const hayPagas = ias.some(x => !esGratis(x.nombre));
-    const soloGoogle = ias.every(x => x.nombre.startsWith('gemini'));
-    if (!hayPagas && intentos.some(x => x.status === 429)) {
-      throw Object.assign(new Error('Se alcanzó el límite de uso gratis de la IA. Esperá un minuto (o hasta mañana si es el límite diario) y probá de nuevo.'), { status: 429 });
+    const soloGoogle = ias.every(x => x.empresa === 'google');
+    if (intentos.length && intentos.every(x => x.status === 429)) {
+      // El cupo diario de Google se renueva a la medianoche de California (4 o 5 de la mañana en Argentina).
+      const msj = intentos.some(x => /PerDay/i.test(x.motivo))
+        ? 'Se terminó el cupo diario de la IA. Vuelve a andar a la madrugada (4 o 5 h). Si ya se activó el pago, revisá la facturación en Google AI Studio.'
+        : intentos.some(x => /PerMinute/i.test(x.motivo))
+          ? 'Se hicieron muchos pedidos seguidos a la IA. Esperá un minuto y probá de nuevo.'
+          : 'Se alcanzó el límite de uso de la IA. Esperá un minuto y probá de nuevo; si sigue, revisá el plan y la facturación en Google AI Studio.';
+      throw Object.assign(new Error(msj), { status: 429 });
     }
     if (intentos.length && intentos.every(x => x.status === 504)) {
       throw Object.assign(new Error('La IA tardó demasiado en responder. Probá con menos fotos o de nuevo en unos minutos.'), { status: 504 });
