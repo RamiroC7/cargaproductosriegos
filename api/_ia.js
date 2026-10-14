@@ -74,36 +74,52 @@ async function leerJson(r) { return r.json().catch(() => ({})); }
 const limiteGemini = json => (json?.error?.details || [])
   .flatMap(d => d.violations || []).map(v => v.quotaId).filter(Boolean).join(', ');
 
+// Ajustes de velocidad que acepta cada modelo (se aprenden con el primer pedido y quedan en memoria).
+const PENSAR = ['minimal', 'low', null]; // de más rápido a sin ajuste
+const ajustesGemini = {};
+
 function gemini(modelo) {
   return {
     nombre: modelo,
     empresa: 'google',
-    async pedir({ prompt, imagenes, signal }) {
-      const cuerpo = pensarPoco => JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }, ...imagenes.map(data => ({ inline_data: { mime_type: 'image/jpeg', data } }))] }],
+    async pedir({ prompt, imagenes, etiquetas, signal }) {
+      const aj = ajustesGemini[modelo] || (ajustesGemini[modelo] = { pensar: 0, resolucion: true });
+      // Con foto de etiqueta, esa se lee en alta (letra chica) y las del producto en baja: menos tokens = más rápido.
+      // Sin foto de etiqueta, todas en la resolución normal porque son las únicas con texto.
+      const resolucion = i => (aj.resolucion && etiquetas > 0)
+        ? { media_resolution: { level: i < etiquetas ? 'MEDIA_RESOLUTION_HIGH' : 'MEDIA_RESOLUTION_LOW' } } : {};
+      const cuerpo = () => JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }, ...imagenes.map((data, i) => ({ inline_data: { mime_type: 'image/jpeg', data }, ...resolucion(i) }))] }],
         generationConfig: {
           responseMimeType: 'application/json', responseSchema: esquemaGemini(), temperature: 0.2,
-          // Para leer una etiqueta alcanza con "pensar poco": responde más rápido.
-          ...(pensarPoco ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
+          // Para leer una etiqueta alcanza con pensar lo mínimo: responde más rápido.
+          ...(PENSAR[aj.pensar] ? { thinkingConfig: { thinkingLevel: PENSAR[aj.pensar] } } : {}),
         },
       });
-      const llamar = async pensarPoco => {
+      const llamar = async () => {
         const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
-          body: cuerpo(pensarPoco), signal,
+          body: cuerpo(), signal,
         });
         return { r, json: await leerJson(r) };
       };
-      let { r, json } = await llamar(true);
-      // Si el modelo no acepta el ajuste de "pensar poco", se repite sin él.
-      if (r.status === 400 && /think/i.test(json?.error?.message || '')) ({ r, json } = await llamar(false));
+      let { r, json } = await llamar();
+      // Si el modelo no acepta algún ajuste, se baja ese ajuste y se repite (queda aprendido para los próximos).
+      for (let i = 0; i < 3 && r.status === 400; i++) {
+        const msj = json?.error?.message || '';
+        if (/think/i.test(msj) && PENSAR[aj.pensar]) aj.pensar++;
+        else if (/media.?resolution/i.test(msj) && aj.resolucion) aj.resolucion = false;
+        else break;
+        ({ r, json } = await llamar());
+      }
       if (!r.ok) {
         const limite = r.status === 429 ? limiteGemini(json) : '';
         return { status: r.status, motivo: limite ? `límite: ${limite}` : json?.error?.message };
       }
       const c = json.candidates?.[0];
       const texto = (c?.content?.parts || []).map(p => p.text || '').join('');
-      return texto ? { status: 200, texto } : { status: 502, motivo: `sin datos (${c?.finishReason || json.promptFeedback?.blockReason || 'vacío'})` };
+      const ajuste = `pensar ${PENSAR[aj.pensar] || 'normal'}${aj.resolucion && etiquetas > 0 ? ', resolución por foto' : ''}`;
+      return texto ? { status: 200, texto, ajuste } : { status: 502, motivo: `sin datos (${c?.finishReason || json.promptFeedback?.blockReason || 'vacío'})` };
     },
   };
 }
@@ -222,7 +238,8 @@ function candidatas() {
 }
 
 // imagenes: lista de fotos en base64 (JPG) del mismo producto.
-async function leerProducto({ imagenes, codigo, categorias }) {
+// etiquetas: cuántas de las primeras son fotos de etiqueta (se leen en alta resolución).
+async function leerProducto({ imagenes, codigo, categorias, etiquetas = 0 }) {
   if (!iaConfigurada()) throw Object.assign(new Error('La IA todavía no está configurada en el servidor.'), { status: 503 });
 
   const prompt = instrucciones(categorias, codigo);
@@ -244,14 +261,14 @@ async function leerProducto({ imagenes, codigo, categorias }) {
       const t0 = Date.now();
       let r;
       try {
-        r = await ia.pedir({ prompt, imagenes, signal: control.signal });
+        r = await ia.pedir({ prompt, imagenes, etiquetas, signal: control.signal });
       } catch {
         // Cortada por demora, porque otra IA ya respondió, o sin conexión.
         r = resuelto ? { status: 0 } : { status: control.signal.aborted ? 504 : 502, motivo: control.signal.aborted ? 'tardó demasiado' : 'no se pudo conectar' };
       } finally {
         clearTimeout(reloj);
       }
-      if (r.status !== 0) intentos.push({ vez: numero, ia: ia.nombre, status: r.status, ms: Date.now() - t0, motivo: r.status === 200 ? 'ok' : String(r.motivo || '').slice(0, 160) });
+      if (r.status !== 0) intentos.push({ vez: numero, ia: ia.nombre, status: r.status, ms: Date.now() - t0, motivo: r.status === 200 ? (r.ajuste ? `ok (${r.ajuste})` : 'ok') : String(r.motivo || '').slice(0, 160) });
       return { ...r, ia: ia.nombre };
     }
 

@@ -161,8 +161,9 @@ window.TN = (() => {
   const salir = () => llamar('POST', '/api/logout');
 
   // La IA lee las fotos y devuelve campos sugeridos. Tira error con un mensaje para mostrar.
-  async function completarConIA(imagenesBase64, codigo) {
-    const r = await llamar('POST', '/api/ia-completar', { imagenes: imagenesBase64, codigo, categorias: C.CATEGORIAS });
+  // etiquetas: cuántas de las primeras fotos son de etiqueta (el servidor las lee en alta resolución).
+  async function completarConIA(imagenesBase64, codigo, etiquetas = 0) {
+    const r = await llamar('POST', '/api/ia-completar', { imagenes: imagenesBase64, codigo, etiquetas, categorias: C.CATEGORIAS });
     if (!r.ok) throw new Error(r.datos.error || `Error ${r.status} al consultar la IA.`);
     return r.datos;
   }

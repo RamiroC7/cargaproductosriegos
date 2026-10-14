@@ -311,7 +311,7 @@
       // La etiqueta va nítida para que se lea la letra chica; la foto del producto alcanza más chica.
       const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, f.soloIA ? 1024 : 640)));
       // Con fotos de otro producto el código cargado no corresponde: no se le pasa a la IA.
-      const info = await TN.completarConIA(imagenes, hayFotosViejas ? '' : form.elements.codigo.value.replace(/\D/g, ''));
+      const info = await TN.completarConIA(imagenes, hayFotosViejas ? '' : form.elements.codigo.value.replace(/\D/g, ''), fotos.filter(f => f.soloIA).length);
       const decision = decidirIA(info, hayFotosViejas);
       // Si eligió no cambiar de producto, las fotos nuevas siguen "sin leer" para poder volver a ofrecerlo.
       if (!(hayFotosViejas && decision === 'completar' && diferenciasIA(info).length)) base.forEach(f => { f.leida = true; });
