@@ -122,7 +122,8 @@ function gemini(modelo) {
       }
       const c = json.candidates?.[0];
       const texto = (c?.content?.parts || []).map(p => p.text || '').join('');
-      const ajuste = `pensar ${PENSAR[aj.pensar] || 'normal'}${aj.resolucion && etiquetas > 0 ? ', resolución por foto' : ''}`;
+      const resol = etiquetas > 0 ? (aj.resolucion ? ', resolución por foto' : ', resolución por foto no aceptada') : ', sin foto de etiqueta';
+      const ajuste = `pensar ${PENSAR[aj.pensar] || 'normal'}${resol}`;
       return texto ? { status: 200, texto, ajuste } : { status: 502, motivo: `sin datos (${c?.finishReason || json.promptFeedback?.blockReason || 'vacío'})` };
     },
   };
@@ -360,7 +361,7 @@ async function leerProducto({ imagenes, codigo, categorias, etiquetas = 0 }) {
   }
 
   const ganador = await competir(ias);
-  console.log('IA intentos', JSON.stringify(intentos));
+  console.log('IA intentos', JSON.stringify(intentos), `total ${Date.now() - inicio} ms, ${imagenes.length} fotos (${etiquetas} de etiqueta)`);
 
   if (!ganador) {
     const soloGoogle = ias.every(x => x.empresa === 'google');
