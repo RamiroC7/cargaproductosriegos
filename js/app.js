@@ -223,25 +223,67 @@
     return llenados;
   }
 
-  // ---------- Completar con IA (lee hasta 4 fotos) ----------
-  function autocompletarIA(info) {
-    const llenados = [];
-    const poner = (campo, valor) => ponerSiVacio(campo, valor, llenados);
-    // Las partes del nombre: si el título no se escribió a mano, se arma solo con ellas.
-    ['tipo', 'marca', 'modelo', 'medida', 'paraQue', 'modoUso'].forEach(c => poner(c, info[c]));
-    poner('especificaciones', (info.especificaciones || []).join('\n'));
-    poner('incluye', (info.incluye || []).join('\n'));
-    elegirCategoriaSiVacia(info.categoria, llenados);
-    poner('codigo', info.codigoBarras);
+  // ---------- Completar con IA (lee hasta 3 fotos) ----------
+  // Lo que la IA quiere poner en cada campo del formulario.
+  function valoresIA(info) {
+    const v = {};
+    ['tipo', 'marca', 'modelo', 'medida', 'paraQue', 'modoUso'].forEach(c => { v[c] = info[c] || ''; });
+    v.especificaciones = (info.especificaciones || []).join('\n');
+    v.incluye = (info.incluye || []).join('\n');
+    v.codigo = info.codigoBarras || '';
     // Peso y medidas son estimaciones: quedan en azul para que los confirme.
-    if (!TN.sinEnvio({ categoria: form.elements.categoria.value })) {
+    if (!TN.sinEnvio({ categoria: form.elements.categoria.value || info.categoria })) {
       [['peso', 'pesoKg'], ['alto', 'altoCm'], ['ancho', 'anchoCm'], ['profundidad', 'profundidadCm']]
-        .forEach(([campo, clave]) => poner(campo, (info[clave] || '').replace('.', ',')));
+        .forEach(([campo, clave]) => { v[campo] = (info[clave] || '').replace('.', ','); });
     }
+    return v;
+  }
+
+  // Campos que identifican al producto: si la IA lee otra cosa acá, es otro producto o una lectura mejor.
+  const IDENTIDAD = { tipo: 'Tipo', marca: 'Marca', modelo: 'Modelo', medida: 'Medida', codigo: 'Código de barras' };
+  const igual = (a, b) => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
+
+  function diferenciasIA(info) {
+    const v = valoresIA(info);
+    return Object.keys(IDENTIDAD)
+      .filter(c => v[c] && form.elements[c].value.trim() && !igual(v[c], form.elements[c].value))
+      .map(c => ({ campo: c, antes: form.elements[c].value.trim(), despues: v[c] }));
+  }
+
+  // reemplazar = false: solo completa lo vacío. true: pisa todo lo que la IA leyó.
+  function autocompletarIA(info, reemplazar = false) {
+    const llenados = [];
+    Object.entries(valoresIA(info)).forEach(([campo, valor]) => {
+      const el = form.elements[campo];
+      if (!valor || (!reemplazar && el.value.trim()) || igual(valor, el.value)) return;
+      el.value = valor;
+      el.classList.add('autocompletado');
+      llenados.push(campo);
+    });
+    if (reemplazar && info.categoria && $(`input[name=categoria][value="${CSS.escape(info.categoria)}"]`)) {
+      form.elements.categoria.value = '';
+      $$('input[name=categoria]').forEach(i => { i.checked = false; });
+    }
+    elegirCategoriaSiVacia(info.categoria, llenados);
     actual.datos.fuenteIA = { modelo: info.modelo_ia || null, fecha: new Date().toISOString() };
     actualizarDerivados();
     $$('.autocompletado').forEach(el => el.closest('[data-campo]')?.classList.remove('con-error'));
     return llenados;
+  }
+
+  // Si la IA leyó algo distinto a lo cargado, pregunta qué hacer.
+  // Devuelve 'nuevo' (otro producto: empieza de cero con las fotos nuevas), 'reemplazar' o 'completar'.
+  function decidirIA(info, hayFotosViejas) {
+    const dif = diferenciasIA(info);
+    if (!dif.length) return 'completar';
+    const lista = dif.map(d => `• ${IDENTIDAD[d.campo]}: "${d.antes}" → "${d.despues}"`).join('\n');
+    if (hayFotosViejas) {
+      const queda = actual.guardado ? 'el anterior ya está guardado' : 'el anterior NO está guardado y se descarta';
+      return confirm(`La IA leyó otro producto en las fotos nuevas:\n${lista}\n\nAceptar: empezar un producto nuevo con las fotos nuevas y lo que leyó la IA (${queda}).\nCancelar: dejar lo cargado y completar solo los campos vacíos.`)
+        ? 'nuevo' : 'completar';
+    }
+    return confirm(`La IA leyó datos distintos a los cargados:\n${lista}\n\nAceptar: reemplazarlos con lo nuevo.\nCancelar: dejar lo cargado y completar solo los campos vacíos.`)
+      ? 'reemplazar' : 'completar';
   }
 
   async function productoConCodigo(codigo) {
@@ -251,9 +293,13 @@
 
   let iaEnCurso = false;
   async function completarConIA() {
+    // Si hay fotos que la IA todavía no leyó, se leen solo esas: pueden ser de otro producto.
     // Primero las de etiqueta (solo IA), que son las que tienen más datos.
     // Hasta 3 fotos: menos datos = respuesta más rápida.
-    const fotos = [...actual.fotos.filter(f => f.soloIA), ...publicables(actual.fotos)].slice(0, 3);
+    const nuevas = actual.fotos.filter(f => !f.leida);
+    const base = nuevas.length ? nuevas : actual.fotos;
+    const hayFotosViejas = nuevas.length > 0 && nuevas.length < actual.fotos.length;
+    const fotos = [...base.filter(f => f.soloIA), ...publicables(base)].slice(0, 3);
     if (!fotos.length || iaEnCurso) return;
     iaEnCurso = true;
     const boton = $('#btn-ia');
@@ -264,16 +310,32 @@
     try {
       // La etiqueta va nítida para que se lea la letra chica; la foto del producto alcanza más chica.
       const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, f.soloIA ? 1024 : 640)));
-      const info = await TN.completarConIA(imagenes, form.elements.codigo.value.replace(/\D/g, ''));
-      const llenados = autocompletarIA(info);
+      // Con fotos de otro producto el código cargado no corresponde: no se le pasa a la IA.
+      const info = await TN.completarConIA(imagenes, hayFotosViejas ? '' : form.elements.codigo.value.replace(/\D/g, ''));
+      const decision = decidirIA(info, hayFotosViejas);
+      // Si eligió no cambiar de producto, las fotos nuevas siguen "sin leer" para poder volver a ofrecerlo.
+      if (!(hayFotosViejas && decision === 'completar' && diferenciasIA(info).length)) base.forEach(f => { f.leida = true; });
+      if (decision === 'nuevo') {
+        const p = vacio();
+        p.fotos = nuevas;
+        cargarEnForm(p);
+        window.scrollTo(0, 0);
+      }
+      const llenados = autocompletarIA(info, decision !== 'completar');
       const repetido = await productoConCodigo(form.elements.codigo.value);
+      const leyo = Object.values(valoresIA(info)).some(Boolean) || info.categoria;
       if (repetido) {
         setEstado('modo_manual', `Ojo: este código de barras ya está cargado en "${TN.titulo(repetido.datos)}". Revisá en Cargados que no sea el mismo producto.`);
       } else if (llenados.length) {
         const estimados = ['peso', 'alto', 'ancho', 'profundidad'].some(c => llenados.includes(c));
-        setEstado('completado_automatico', `La IA completó lo marcado en azul. Revisalo${estimados ? ' (el peso y las medidas son estimados: confirmalos)' : ''} y poné precio y cantidad.`);
+        const que = decision === 'nuevo' ? 'Producto nuevo: la IA completó' : decision === 'reemplazar' ? 'La IA reemplazó y completó' : 'La IA completó';
+        setEstado('completado_automatico', `${que} lo marcado en azul. Revisalo${estimados ? ' (el peso y las medidas son estimados: confirmalos)' : ''} y poné precio y cantidad.`);
+      } else if (leyo) {
+        setEstado('modo_manual', decision === 'completar' && diferenciasIA(info).length
+          ? 'Se dejó lo que ya estaba cargado. Si querés usar lo que leyó la IA, tocá "Completar con IA" de nuevo y elegí Aceptar.'
+          : 'La IA leyó lo mismo que ya está cargado: no hubo nada para cambiar.');
       } else {
-        setEstado('modo_manual', 'La IA no encontró datos nuevos para completar. Probá con una foto donde se lea mejor la etiqueta.');
+        setEstado('modo_manual', 'La IA no pudo leer datos en las fotos. Probá con una foto donde se lea mejor la etiqueta.');
       }
     } catch (e) {
       setEstado('modo_manual', e.message);
