@@ -2,13 +2,14 @@
 // Las API keys viven solo en el servidor. Cada IA se usa solo si su key está cargada.
 //
 // Variables de entorno (todas opcionales; con una alcanza):
-//   GEMINI_API_KEY     Google AI Studio (gratis con límites). Modelo: GEMINI_MODELO (def. 'gemini-3.8-flash').
-//   MISTRAL_API_KEY    Mistral (plan Experiment gratis, sin tarjeta). Modelo: MISTRAL_MODELO (def. 'mistral-small-latest').
-//   OPENAI_API_KEY     ChatGPT (OpenAI, pago).        Modelo: OPENAI_MODELO (def. 'gpt-6-luna').
-//   XAI_API_KEY        Grok (xAI, pago).              Modelo: XAI_MODELO    (def. 'grok-4.7').
-//   ANTHROPIC_API_KEY  Claude (Anthropic, pago).      Modelo: CLAUDE_MODELO (def. 'claude-opus-5-5').
+//   GEMINI_API_KEY      Google AI Studio (pago, con crédito). Modelo: GEMINI_MODELO (def. 'gemini-3.8-flash').
+//   OPENROUTER_API_KEY  OpenRouter (modelos gratis con límite diario). Modelos: OPENROUTER_MODELOS (lista separada por comas).
+//   MISTRAL_API_KEY     Mistral (plan gratis). Modelo: MISTRAL_MODELO (def. 'mistral-small-latest').
+//   OPENAI_API_KEY      ChatGPT (OpenAI, pago).        Modelo: OPENAI_MODELO (def. 'gpt-6-luna').
+//   XAI_API_KEY         Grok (xAI, pago).              Modelo: XAI_MODELO    (def. 'grok-4.7').
+//   ANTHROPIC_API_KEY   Claude (Anthropic, pago).      Modelo: CLAUDE_MODELO (def. 'claude-opus-5-5').
 //
-// Orden: primero Gemini; si falla o tarda, entran las demás de la más barata a la más cara.
+// Orden: Gemini pago; si falla o tarda, las gratis de otras empresas y después las pagas (ver candidatas()).
 // Las IAs compiten en vez de esperar en fila: si una no respondió en ESCALON_MS (o falló), arranca la
 // siguiente en paralelo, y gana la primera respuesta buena. El error de una nunca frena a las otras.
 // Se prioriza la velocidad: si dos responden, se pagan las dos (son centavos).
@@ -28,7 +29,7 @@ const PAUSA_MAXIMA_MS = 8000;
 const PLAZO_REINTENTOS_MS = 40000;
 
 const env = (nombre, porDefecto) => process.env[nombre] || porDefecto;
-const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.MISTRAL_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
+const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY || process.env.MISTRAL_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
 
 function instrucciones(categorias, codigo) {
   return `Sos asistente de carga de productos de "Riegos del Sur", un comercio argentino de piletas, riego, jardín, vivero, herramientas y muebles de exterior.
@@ -191,6 +192,47 @@ function mistral(modelo) {
   };
 }
 
+// OpenRouter: da acceso gratis (con límite diario) a modelos que leen fotos, en servidores
+// distintos a los de Gemini, así que no se satura junto con Google. Se le pasa una lista de modelos
+// y OpenRouter salta solo al siguiente si uno no está disponible.
+function openrouter(modelos) {
+  return {
+    nombre: `openrouter (${modelos[0]})`,
+    empresa: 'openrouter',
+    async pedir({ prompt, imagenes, signal }) {
+      const llamar = formato => fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'X-Title': 'Riegos del Sur - carga de productos' },
+        body: JSON.stringify({
+          models: modelos,
+          temperature: 0.2,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              ...imagenes.map(data => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${data}` } })),
+            ],
+          }],
+          ...(formato ? { response_format: formato } : {}),
+        }),
+        signal,
+      });
+      // Los modelos gratis no siempre aceptan el esquema: se baja a "JSON simple" y después a texto
+      // (el prompt ya dice qué campos van y la respuesta se limpia al leerla).
+      const formatos = [{ type: 'json_schema', json_schema: { name: 'producto', strict: true, schema: esquemaJson() } }, { type: 'json_object' }, null];
+      let r, json;
+      for (const formato of formatos) {
+        r = await llamar(formato);
+        json = await leerJson(r);
+        if (r.status !== 400) break;
+      }
+      if (!r.ok) return { status: r.status, motivo: json?.error?.message || json?.error };
+      const texto = json.choices?.[0]?.message?.content;
+      return texto ? { status: 200, texto, ajuste: json.model } : { status: 502, motivo: 'sin datos' };
+    },
+  };
+}
+
 function claude(modelo) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   return {
@@ -228,14 +270,20 @@ function claude(modelo) {
 
 // Las IAs disponibles, en el orden en que se prueban.
 function candidatas() {
+  // Prioridad: Gemini pago → gratis de otras empresas → pagas de otras empresas.
+  // Las Gemini de respaldo van intercaladas: si Google se satura caen todas juntas, y así otra empresa
+  // entra enseguida en vez de esperar a que fallen las cuatro.
   const lista = [];
-  const geminiPrincipal = env('GEMINI_MODELO', 'gemini-3.8-flash');
-  if (process.env.GEMINI_API_KEY) lista.push(gemini(geminiPrincipal), gemini('gemini-3.6-flash'));
+  const g = process.env.GEMINI_API_KEY;
+  if (g) lista.push(gemini(env('GEMINI_MODELO', 'gemini-3.8-flash')));
+  if (process.env.OPENROUTER_API_KEY) lista.push(openrouter(env('OPENROUTER_MODELOS', 'google/gemma-4-31b-it:free,nvidia/nemotron-nano-12b-v2-vl:free').split(',').map(m => m.trim()).filter(Boolean)));
+  if (g) lista.push(gemini('gemini-3.7-flash'));
   if (process.env.MISTRAL_API_KEY) lista.push(mistral(env('MISTRAL_MODELO', 'mistral-small-latest')));
+  if (g) lista.push(gemini('gemini-3.6-flash'));
   if (process.env.OPENAI_API_KEY) lista.push(compatibleOpenAI('openai', env('OPENAI_MODELO', 'gpt-6-luna'), 'https://api.openai.com/v1/chat/completions', process.env.OPENAI_API_KEY, env('OPENAI_MODELO', 'gpt-6-luna')));
   if (process.env.XAI_API_KEY) lista.push(compatibleOpenAI('xai', env('XAI_MODELO', 'grok-4.7'), 'https://api.x.ai/v1/chat/completions', process.env.XAI_API_KEY, env('XAI_MODELO', 'grok-4.7')));
   if (process.env.ANTHROPIC_API_KEY) lista.push(claude(env('CLAUDE_MODELO', 'claude-opus-5-5')));
-  if (process.env.GEMINI_API_KEY) lista.push(gemini('gemini-3.7-flash'), gemini('gemini-3.5-flash'));
+  if (g) lista.push(gemini('gemini-3.5-flash'));
   // Sin repetidos (por si GEMINI_MODELO coincide con un respaldo).
   return lista.filter((x, i) => lista.findIndex(y => y.nombre === x.nombre) === i);
 }
@@ -338,7 +386,9 @@ async function leerProducto({ imagenes, codigo, categorias, etiquetas = 0 }) {
   }
 
   let campos;
-  try { campos = JSON.parse(ganador.texto); } catch { throw Object.assign(new Error('La IA devolvió un formato inesperado. Probá de nuevo.'), { status: 502 }); }
+  // Algunos modelos gratis envuelven el JSON en texto o en ```json … ```: se toma lo que está entre llaves.
+  const soloJson = t => { const i = t.indexOf('{'), j = t.lastIndexOf('}'); return i >= 0 && j > i ? t.slice(i, j + 1) : t; };
+  try { campos = JSON.parse(soloJson(ganador.texto)); } catch { throw Object.assign(new Error('La IA devolvió un formato inesperado. Probá de nuevo.'), { status: 502 }); }
 
   const limpiar = v => String(v ?? '').replace(/\s+/g, ' ').trim();
   const listar = v => (Array.isArray(v) ? v : []).map(limpiar).filter(Boolean);
