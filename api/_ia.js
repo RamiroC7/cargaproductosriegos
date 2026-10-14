@@ -193,45 +193,57 @@ function mistral(modelo) {
   };
 }
 
-// OpenRouter: da acceso gratis (con límite diario) a modelos que leen fotos, en servidores
-// distintos a los de Gemini, así que no se satura junto con Google. Se le pasa una lista de modelos
-// y OpenRouter salta solo al siguiente si uno no está disponible.
+// OpenRouter: da acceso gratis (con límite diario) a modelos que leen fotos. Se prueban de a uno:
+// si uno está limitado (429) o caído, se pasa al siguiente. Primero va el de NVIDIA porque el Gemma
+// gratis lo atiende Google y se satura junto con Gemini.
 function openrouter(modelos) {
   return {
-    nombre: `openrouter (${modelos[0]})`,
+    nombre: 'openrouter',
     empresa: 'openrouter',
     async pedir({ prompt, imagenes, signal }) {
-      const llamar = formato => fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'X-Title': 'Riegos del Sur - carga de productos' },
-        body: JSON.stringify({
-          models: modelos,
-          temperature: 0.2,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              ...imagenes.map(data => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${data}` } })),
-            ],
-          }],
-          ...(formato ? { response_format: formato } : {}),
-        }),
-        signal,
-      });
-      // Los modelos gratis no siempre aceptan el esquema: se baja a "JSON simple" y después a texto
-      // (el prompt ya dice qué campos van y la respuesta se limpia al leerla).
-      const formatos = [{ type: 'json_schema', json_schema: { name: 'producto', strict: true, schema: esquemaJson() } }, { type: 'json_object' }, null];
-      let r, json;
-      for (const formato of formatos) {
-        r = await llamar(formato);
-        json = await leerJson(r);
-        if (r.status !== 400) break;
+      let ultimo = { status: 502, motivo: 'sin modelos' };
+      for (const modelo of modelos) {
+        ultimo = await openrouterModelo(modelo, { prompt, imagenes, signal });
+        if (ultimo.status === 200) return ultimo;
+        ultimo.motivo = `${modelo}: ${ultimo.motivo}`;
+        if (![429, 500, 502, 503, 404].includes(ultimo.status)) break;
       }
-      if (!r.ok) return { status: r.status, motivo: json?.error?.message || json?.error };
-      const texto = json.choices?.[0]?.message?.content;
-      return texto ? { status: 200, texto, ajuste: json.model } : { status: 502, motivo: 'sin datos' };
+      return ultimo;
     },
   };
+}
+
+async function openrouterModelo(modelo, { prompt, imagenes, signal }) {
+  const llamar = formato => fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'X-Title': 'Riegos del Sur - carga de productos' },
+    body: JSON.stringify({
+      model: modelo,
+      temperature: 0.2,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          ...imagenes.map(data => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${data}` } })),
+        ],
+      }],
+      ...(formato ? { response_format: formato } : {}),
+    }),
+    signal,
+  });
+  // Los modelos gratis no siempre aceptan el esquema: se baja a "JSON simple" y después a texto
+  // (el prompt ya dice qué campos van y la respuesta se limpia al leerla).
+  const formatos = [{ type: 'json_schema', json_schema: { name: 'producto', strict: true, schema: esquemaJson() } }, { type: 'json_object' }, null];
+  let r, json;
+  for (const formato of formatos) {
+    r = await llamar(formato);
+    json = await leerJson(r);
+    if (r.status !== 400) break;
+  }
+  // OpenRouter detalla en metadata.raw el error real del proveedor (ej. "rate limited upstream").
+  if (!r.ok) return { status: r.status, motivo: [json?.error?.message, json?.error?.metadata?.raw].filter(Boolean).join(' · ') || json?.error };
+  const texto = json.choices?.[0]?.message?.content;
+  return texto ? { status: 200, texto, ajuste: json.model || modelo } : { status: 502, motivo: 'sin datos' };
 }
 
 function claude(modelo) {
@@ -277,7 +289,7 @@ function candidatas() {
   const lista = [];
   const g = process.env.GEMINI_API_KEY;
   if (g) lista.push(gemini(env('GEMINI_MODELO', 'gemini-3.8-flash')));
-  if (process.env.OPENROUTER_API_KEY) lista.push(openrouter(env('OPENROUTER_MODELOS', 'google/gemma-4-31b-it:free,nvidia/nemotron-nano-12b-v2-vl:free').split(',').map(m => m.trim()).filter(Boolean)));
+  if (process.env.OPENROUTER_API_KEY) lista.push(openrouter(env('OPENROUTER_MODELOS', 'nvidia/nemotron-nano-12b-v2-vl:free,google/gemma-4-31b-it:free').split(',').map(m => m.trim()).filter(Boolean)));
   if (g) lista.push(gemini('gemini-3.7-flash'));
   if (process.env.MISTRAL_API_KEY) lista.push(mistral(env('MISTRAL_MODELO', 'mistral-small-latest')));
   if (g) lista.push(gemini('gemini-3.6-flash'));
