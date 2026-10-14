@@ -312,8 +312,10 @@
       if (estadoUI === 'buscando_info') setEstado('buscando_info', 'Google está con mucha demanda. Seguimos intentando, puede tardar hasta un minuto…');
     }, 12000);
     try {
-      // La etiqueta va nítida para que se lea la letra chica; la foto del producto alcanza más chica.
-      const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, f.soloIA ? 1024 : 640)));
+      // La etiqueta va nítida para que se lea la letra chica; con etiqueta aparte, la foto del producto alcanza más chica.
+      // Sin foto de etiqueta (lo más común), la del producto es la que tiene el texto: va nítida también.
+      const hayEtiqueta = fotos.some(f => f.soloIA);
+      const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, f.soloIA || !hayEtiqueta ? 1024 : 640)));
       // Con fotos de otro producto el código cargado no corresponde: no se le pasa a la IA.
       const info = await TN.completarConIA(imagenes, hayFotosViejas ? '' : form.elements.codigo.value.replace(/\D/g, ''), fotos.filter(f => f.soloIA).length);
       const decision = decidirIA(info, hayFotosViejas);
