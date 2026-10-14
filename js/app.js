@@ -333,11 +333,25 @@
   });
   $('#btn-buscar-codigo').addEventListener('click', () => buscarCodigo());
 
+  // Si se escanea un código distinto con el formulario ya cargado (por ejemplo, completado con IA
+  // y sin guardar), pregunta si es otro producto: si no, se mezclarían los datos de los dos.
+  function esOtroProducto(codigo) {
+    leerForm();
+    const d = actual.datos;
+    if (codigo === d.codigo) return false;
+    const conDatos = actual.fotos.length || CAMPOS.some(n => n !== 'codigo' && d[n]);
+    if (!conDatos) return false;
+    const nombre = TN.titulo(d) || 'el producto que estás cargando';
+    const queda = actual.guardado ? 'ya está guardado' : 'NO está guardado y se descarta';
+    return confirm(`¿Este código es de otro producto?\n\nAceptar: empezar un producto nuevo ("${nombre}" ${queda}).\nCancelar: ponerle este código a "${nombre}".`);
+  }
+
   $('#btn-escanear').addEventListener('click', async () => {
     setEstado('escaneando', 'Abriendo la cámara…');
     try {
       const codigo = await Escaner.escanear();
       if (!codigo) { setEstado('inicial'); return; }
+      if (esOtroProducto(codigo.replace(/\D/g, ''))) cargarEnForm(vacio());
       form.elements.codigo.value = codigo.replace(/\D/g, '');
       form.elements.codigo.classList.remove('autocompletado');
       await buscarCodigo();
