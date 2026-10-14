@@ -307,6 +307,10 @@
     boton.disabled = true;
     boton.innerHTML = `${SPINNER}Leyendo ${fotos.length === 1 ? 'la foto' : 'las fotos'}…`;
     setEstado('buscando_info', `La IA está leyendo ${fotos.length === 1 ? 'la foto' : `las ${fotos.length} fotos`}…`);
+    // Si Google está saturado el servidor sigue reintentando: se avisa para que no parezca colgado.
+    const avisoDemora = setTimeout(() => {
+      if (estadoUI === 'buscando_info') setEstado('buscando_info', 'Google está con mucha demanda. Seguimos intentando, puede tardar hasta un minuto…');
+    }, 12000);
     try {
       // La etiqueta va nítida para que se lea la letra chica; la foto del producto alcanza más chica.
       const imagenes = await Promise.all(fotos.map(f => Imagenes.reducir(f.blob, f.soloIA ? 1024 : 640)));
@@ -340,6 +344,7 @@
     } catch (e) {
       setEstado('modo_manual', e.message);
     } finally {
+      clearTimeout(avisoDemora);
       iaEnCurso = false;
       boton.disabled = false;
       boton.innerHTML = contenido;

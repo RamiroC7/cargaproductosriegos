@@ -20,9 +20,12 @@ const Anthropic = AnthropicSDK.default || AnthropicSDK;
 
 const TIMEOUT_MS = 45000; // tope por IA
 const ESCALON_MS = 6000;  // si una IA no respondió en este tiempo, arranca la siguiente en paralelo
-const REINTENTOS = 3;                // veces que se prueba una IA que dice "saturada"
-const PAUSA_REINTENTO_MS = 2500;     // espera antes de volver a probarla
-const PLAZO_REINTENTOS_MS = 50000;   // pasado este tiempo desde el inicio ya no se reintenta
+// Una IA que dice "saturada" se vuelve a probar con pausas cada vez más largas (2,5 s, 5 s, 7,5 s, 8 s…)
+// mientras no pase PLAZO_REINTENTOS_MS: las saturaciones de Google a veces duran más de 10 segundos.
+const REINTENTOS = 8;
+const PAUSA_REINTENTO_MS = 2500;
+const PAUSA_MAXIMA_MS = 8000;
+const PLAZO_REINTENTOS_MS = 40000;
 
 const env = (nombre, porDefecto) => process.env[nombre] || porDefecto;
 const iaConfigurada = () => !!(process.env.GEMINI_API_KEY || process.env.MISTRAL_API_KEY || process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
@@ -293,7 +296,8 @@ async function leerProducto({ imagenes, codigo, categorias, etiquetas = 0 }) {
           const saturada = r.status === 503 || r.status === 500;
           if (saturada && vez < REINTENTOS && Date.now() - inicio < PLAZO_REINTENTOS_MS) {
             // Vuelve a la fila después de una pausa; mientras tanto siguen las demás.
-            relojes.push(setTimeout(() => { activas--; pendientes.push({ ia, vez: vez + 1 }); lanzar(); }, PAUSA_REINTENTO_MS));
+            const pausa = Math.min(PAUSA_REINTENTO_MS * vez, PAUSA_MAXIMA_MS);
+            relojes.push(setTimeout(() => { activas--; pendientes.push({ ia, vez: vez + 1 }); lanzar(); }, pausa));
             lanzar();
             return;
           }
