@@ -1,4 +1,5 @@
 // Prepara cada foto para Tiendanube: cuadrada, fondo blanco, JPG y con un tamaño razonable.
+// Acepta cualquier tamaño y cualquier formato que abra el navegador (JPG, PNG, WebP, AVIF, GIF, BMP…).
 // Soporta HEIC/HEIF (formato nativo de iPhone): los convierte a JPEG antes de procesarlos.
 window.Imagenes = (() => {
   const C = window.CONFIG;
@@ -66,11 +67,9 @@ window.Imagenes = (() => {
     const ancho = img.width, alto = img.height;
     const lado = Math.max(ancho, alto);
 
-    if (lado < C.FOTO_LADO_MINIMO) {
-      throw new Error(`"${archivo.name}" es muy chica (${ancho}×${alto} px). Tiene que medir al menos ${C.FOTO_LADO_MINIMO} px.`);
-    }
+    if (!lado) throw new Error(`No se pudo leer el tamaño de "${archivo.name || 'foto'}". Probá guardarla como JPG o PNG.`);
 
-    // Se completa con blanco hasta quedar cuadrada, sin recortar el producto.
+    // Se completa con blanco hasta quedar cuadrada, sin recortar el producto. Las chicas quedan de su tamaño.
     const destino = Math.min(lado, C.FOTO_LADO_MAXIMO);
     const escala = destino / lado;
     const w = Math.round(ancho * escala), h = Math.round(alto * escala);
@@ -107,7 +106,10 @@ window.Imagenes = (() => {
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(img.width * escala);
     canvas.height = Math.round(img.height * escala);
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; // los PNG con transparencia quedarían negros en JPG
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     return new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
   }
 

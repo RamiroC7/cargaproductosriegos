@@ -29,7 +29,6 @@ window.CONFIG = {
   ATRIBUTOS_VARIANTE: ['Medida', 'Color', 'Capacidad'],
 
   FOTOS_MINIMO: 1,
-  FOTO_LADO_MINIMO: 1024, // px
   FOTO_LADO_MAXIMO: 2048, // px
 
   // Tiempo máximo para esperar la búsqueda del código de barras antes de pasar a carga manual.

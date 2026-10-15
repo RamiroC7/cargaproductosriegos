@@ -9,7 +9,7 @@ index.html          formulario y lista de productos cargados
 js/config.js        ← lo único que hay que tocar (API_BASE, categorías, reglas de fotos)
 js/app.js           pantalla: formulario, validaciones, lista
 js/tiendanube.js    convierte lo cargado al formato de la API de Tiendanube
-js/imagenes.js      fotos: cuadradas con fondo blanco, JPG, entre 1024 y 2048 px
+js/imagenes.js      fotos: cuadradas con fondo blanco, JPG, cualquier formato y tamaño (máx. 2048 px)
 js/db.js            guarda borradores y fotos en el navegador (IndexedDB)
 api/                backend para Vercel que habla con Tiendanube (el token nunca llega al navegador)
 ```
