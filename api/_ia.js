@@ -194,8 +194,8 @@ function mistral(modelo) {
 }
 
 // OpenRouter: da acceso gratis (con límite diario) a modelos que leen fotos. Se prueban de a uno:
-// si uno está limitado (429) o caído, se pasa al siguiente. Primero va el de NVIDIA porque el Gemma
-// gratis lo atiende Google y se satura junto con Gemini.
+// si uno está limitado (429) o caído, se pasa al siguiente. Primero van los de otras empresas porque
+// el Gemma gratis lo atiende Google y se satura junto con Gemini.
 function openrouter(modelos) {
   return {
     nombre: 'openrouter',
@@ -289,7 +289,7 @@ function candidatas() {
   const lista = [];
   const g = process.env.GEMINI_API_KEY;
   if (g) lista.push(gemini(env('GEMINI_MODELO', 'gemini-3.8-flash')));
-  if (process.env.OPENROUTER_API_KEY) lista.push(openrouter(env('OPENROUTER_MODELOS', 'nvidia/nemotron-nano-12b-v2-vl:free,google/gemma-4-31b-it:free').split(',').map(m => m.trim()).filter(Boolean)));
+  if (process.env.OPENROUTER_API_KEY) lista.push(openrouter(env('OPENROUTER_MODELOS', 'minimax/minimax-m3.1-flash:free,nvidia/nemotron-3.5-super-vl:free,thinkingmachines/inkling-small:free,google/gemma-4-31b-it:free').split(',').map(m => m.trim()).filter(Boolean)));
   if (g) lista.push(gemini('gemini-3.7-flash'));
   if (process.env.MISTRAL_API_KEY) lista.push(mistral(env('MISTRAL_MODELO', 'mistral-small-latest')));
   if (g) lista.push(gemini('gemini-3.6-flash'));
