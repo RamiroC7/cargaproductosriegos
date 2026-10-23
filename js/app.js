@@ -589,7 +589,8 @@
     if (!TN.titulo(d)) error('nombre', 'Falta el título del producto.');
     if (!d.sku) error('sku', 'Falta el SKU.');
     if (!d.categoria) error('categoria', 'Elegí una categoría.');
-    if (!(TN.numero(d.precio) > 0)) error('precio', 'Falta el precio de venta.');
+    // El precio es opcional: sin precio el producto queda de vidriera en Tiendanube.
+    if (String(d.precio ?? '').trim() && !(TN.numero(d.precio) > 0)) error('precio', 'El precio no es un número válido (o dejalo vacío para que quede de vidriera).');
     if (!d.tieneVariantes && !esStock(d.stock)) error('stock', 'Falta la cantidad en stock (un número entero, puede ser 0).');
     const nFotos = publicables(actual.fotos).length;
     if (nFotos < C.FOTOS_MINIMO) error('fotos', C.FOTOS_MINIMO === 1 ? 'Falta al menos una foto para publicar (las "Solo IA" no cuentan).' : `Faltan fotos: hay ${nFotos} para publicar y se necesitan al menos ${C.FOTOS_MINIMO}.`);
@@ -718,6 +719,10 @@
       const errores = await validar();
       mostrarErrores(errores);
       if (errores.length) return;
+
+      const d = actual.datos;
+      const sinPrecio = !(TN.numero(d.precio) > 0) && (!d.tieneVariantes || d.variantes.some(v => !(TN.numero(v.precio) > 0)));
+      if (sinPrecio && !confirm('Este producto no tiene precio.\n\n¿Querés agregarlo igual? Va a quedar de vidriera en la tienda: se ve pero no se puede comprar.')) return;
 
       const p = actual;
       setEstado('guardando', 'Guardando…');

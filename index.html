@@ -221,11 +221,12 @@
           <div class="card">
             <div class="grid grid-cols-2 gap-4">
               <div data-campo="precio">
-                <label class="lbl" for="precio">Precio de venta <span class="text-red-600">*</span></label>
+                <label class="lbl" for="precio">Precio de venta <span class="opc">opcional</span></label>
                 <div class="relative">
                   <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
                   <input id="precio" name="precio" class="inp pl-7" inputmode="decimal" placeholder="Ej.: 12.500">
                 </div>
+                <p class="ayuda">Sin precio el producto se publica de vidriera: se ve en la tienda pero no se puede comprar.</p>
               </div>
               <div data-campo="stock" id="grupo-stock">
                 <label class="lbl" for="stock">Cantidad en stock <span class="text-red-600">*</span></label>

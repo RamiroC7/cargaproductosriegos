@@ -18,7 +18,7 @@ api/                backend para Vercel que habla con Tiendanube (el token nunca
 
 1. **Fotos:** el producto de frente (se publica) y la etiqueta o el dorso (solo la lee la IA). Al sacar la de etiqueta, la IA completa sola: nombre, marca, categoría, descripción, código de barras y una estimación de peso y medidas.
 2. **Revisá:** lo azul lo completó la IA; se corrige lo que haga falta.
-3. **Precio, cantidad y envío:** lo único que la IA no puede saber. Peso y medidas estimados se confirman.
+3. **Precio, cantidad y envío:** lo único que la IA no puede saber. El precio es opcional: sin precio el producto queda de vidriera en Tiendanube. Peso y medidas estimados se confirman.
 4. **Códigos y extras (opcional):** el código de barras ya viene leído (o se escanea); el SKU se genera solo si queda vacío (usa el código de barras o RDS-xxxx). Variantes y proveedor.
 
 Después de guardar aparece **Cargar uno parecido**: copia todo menos fotos, códigos y cantidad, para cargar rápido otra medida o color del mismo producto.
