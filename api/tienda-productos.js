@@ -1,6 +1,8 @@
-// GET /api/tienda-productos → todos los productos que ya están en Tiendanube, en versión resumida.
-// Sirve para que la lista de Cargados muestre lo que hay en la tienda (lo haya cargado quien sea)
-// y para avisar si un código de barras o SKU ya existe.
+// Productos que ya están en Tiendanube.
+// GET /api/tienda-productos        → todos, en versión resumida (para la lista de Cargados
+//                                     y para avisar si un código de barras o SKU ya existe).
+// GET /api/tienda-productos?id=123 → todos los datos de uno, para verlo completo dentro del sistema.
+// (Van juntas porque el plan gratis de Vercel permite hasta 12 funciones en /api.)
 const { tn, preparar, responderError } = require('./_tiendanube');
 
 const POR_PAGINA = 200; // máximo que acepta Tiendanube
@@ -31,9 +33,44 @@ function resumir(p) {
   };
 }
 
+function detallar(p) {
+  return {
+    id: p.id,
+    nombre: texto(p.name),
+    descripcion: texto(p.description),
+    publicado: !!p.published,
+    marca: p.brand || null,
+    etiquetas: p.tags || '',
+    categorias: (p.categories || []).map(c => texto(c.name)).filter(Boolean),
+    atributos: (p.attributes || []).map(texto),
+    imagenes: (p.images || []).sort((a, b) => (a.position || 0) - (b.position || 0)).map(i => i.src),
+    requiereEnvio: p.requires_shipping !== false,
+    variantes: (p.variants || []).map(v => ({
+      valores: (v.values || []).map(texto),
+      sku: v.sku || null,
+      codigo: v.barcode || null,
+      precio: numero(v.price),
+      precioPromocional: numero(v.promotional_price),
+      stock: v.stock == null ? null : Number(v.stock), // null = ilimitado
+      peso: numero(v.weight),
+      ancho: numero(v.width),
+      alto: numero(v.height),
+      profundidad: numero(v.depth),
+    })),
+    creado: p.created_at || null,
+    actualizado: p.updated_at || null,
+  };
+}
+
 module.exports = async (req, res) => {
   if (!preparar(req, res, 'GET')) return;
   try {
+    if (req.query.id != null) {
+      const id = String(req.query.id).replace(/\D/g, '');
+      if (!id) return res.status(400).json({ error: 'Falta el producto.' });
+      return res.status(200).json(detallar(await tn('GET', `/products/${id}`)));
+    }
+
     const productos = [];
     for (let pagina = 1; pagina <= 50; pagina++) {
       const lote = await tn('GET', `/products?per_page=${POR_PAGINA}&page=${pagina}&fields=${CAMPOS}`).catch(e => {

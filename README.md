@@ -48,7 +48,7 @@ La app pide usuario y contraseña al abrirse. Hay un solo usuario, definido en V
 - `ADMIN_USUARIO` y `ADMIN_CLAVE`: usuario y contraseña del administrador.
 - `SESION_SECRETO`: texto aleatorio de 32 caracteres o más para firmar las sesiones. Si se cambia, se cierran todas las sesiones abiertas.
 
-La sesión dura 12 horas y se guarda en una cookie `HttpOnly` (el JavaScript de la página no la puede leer). Después de 5 intentos fallidos desde la misma IP, se bloquea 15 minutos. Toda la API (`/api/*`) exige sesión, salvo `login`, `sesion`, `logout` y `estado`.
+La sesión dura 12 horas y se guarda en una cookie `HttpOnly` (el JavaScript de la página no la puede leer). Después de 5 intentos fallidos desde la misma IP, se bloquea 15 minutos. Toda la API (`/api/*`) exige sesión, salvo `login`, `sesion` (GET consulta, POST cierra la sesión) y `estado`. El plan gratis de Vercel permite hasta 12 funciones en `/api`: antes de agregar una nueva, sumala a una existente.
 
 ## Conectarlo con Tiendanube
 

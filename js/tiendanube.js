@@ -158,7 +158,7 @@ window.TN = (() => {
     if (!r.ok) throw new Error(r.datos.error || `Error ${r.status} al ingresar.`);
     return r.datos;
   }
-  const salir = () => llamar('POST', '/api/logout');
+  const salir = () => llamar('POST', '/api/sesion');
 
   // La IA lee las fotos y devuelve campos sugeridos. Tira error con un mensaje para mostrar.
   // etiquetas: cuántas de las primeras fotos son de etiqueta (el servidor las lee en alta resolución).
@@ -269,7 +269,7 @@ window.TN = (() => {
   }
 
   // Todos los datos de un producto de la tienda (para la ventana de detalle).
-  const detalleTienda = id => exigir('GET', `/api/tienda-producto?id=${encodeURIComponent(id)}`);
+  const detalleTienda = id => exigir('GET', `/api/tienda-productos?id=${encodeURIComponent(id)}`);
 
   return { detalleTienda, armarNombre, titulo, armarPayload, armarRegistro, sinEnvio, skus, numero, slug, sugerirCategoria, cargarEstado, estado, conectado, buscarCodigo, publicar, sesion, ingresar, salir, completarConIA, productosTienda, estadoTienda, enTienda };
 })();
