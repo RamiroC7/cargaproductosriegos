@@ -339,7 +339,6 @@
         <h1 class="text-xl sm:text-2xl font-semibold text-slate-900">Productos cargados</h1>
         <div class="flex flex-wrap gap-2">
           <button type="button" id="btn-recuperar" class="btn-secundario">Recuperar del respaldo</button>
-          <button type="button" id="btn-exportar" class="btn-secundario">Descargar copia</button>
           <button type="button" id="btn-ir-cargar" class="btn-primario">+ Nuevo</button>
         </div>
       </div>
@@ -349,11 +348,27 @@
       <div id="aviso-api" class="hidden mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         <b>Todavía no está conectada a Tiendanube.</b> Los productos quedan guardados en este celular. Cuando se conecte, se publican desde acá con el botón <b>Publicar</b>. No borres los datos del navegador mientras tanto.
       </div>
+      <input type="search" id="buscar-lista" placeholder="Buscar nombre, SKU o código" autocomplete="off" enterkeyhint="search" class="inp">
+      <div class="flex items-center justify-between gap-3 mt-2 mb-4 min-h-[2.25rem]">
+        <p id="estado-tienda" class="text-xs text-slate-500"></p>
+        <button type="button" id="btn-actualizar-tienda" class="btn-secundario !px-3 !py-2 shrink-0">Actualizar</button>
+      </div>
       <div id="lista" class="space-y-3"></div>
     </section>
   </main>
 
   <div id="toast" class="fixed left-1/2 -translate-x-1/2 top-16 z-[60] w-[calc(100%-2rem)] max-w-md hidden"></div>
+
+  <!-- Detalle de un producto que ya está en Tiendanube -->
+  <div id="detalle" class="hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="detalle-titulo">
+    <div class="bg-white w-full sm:max-w-2xl max-h-[92dvh] overflow-y-auto overscroll-contain rounded-t-2xl sm:rounded-2xl shadow-xl">
+      <div class="sticky top-0 z-10 bg-white border-b border-slate-200 flex items-start justify-between gap-3 px-4 py-3">
+        <h2 id="detalle-titulo" class="font-semibold text-slate-900 leading-snug pt-1.5"></h2>
+        <button type="button" id="detalle-cerrar" class="w-10 h-10 shrink-0 grid place-items-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200" aria-label="Cerrar">✕</button>
+      </div>
+      <div id="detalle-cuerpo" class="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))]"></div>
+    </div>
+  </div>
 
   <!-- Escáner -->
   <div id="escaner" class="hidden fixed inset-0 z-50 bg-black/90 flex flex-col" role="dialog" aria-modal="true" aria-label="Escanear código de barras">

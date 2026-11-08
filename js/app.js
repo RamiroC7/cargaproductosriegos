@@ -69,14 +69,22 @@
     $('#vista-form').classList.toggle('hidden', vista !== 'form');
     $('#vista-lista').classList.toggle('hidden', vista !== 'lista');
     $$('[data-vista]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.vista === vista)));
-    if (vista === 'lista') renderLista();
+    if (vista === 'lista') abrirLista();
     window.scrollTo(0, 0);
   }
   $$('[data-vista]').forEach(b => b.addEventListener('click', () => mostrarVista(b.dataset.vista)));
 
+  // Cuenta lo de este dispositivo más lo que está en la tienda (sin contar dos veces lo publicado desde acá).
   async function actualizarContador() {
-    const n = (await DB.listar()).length;
+    const locales = await DB.listar();
+    const n = locales.length + soloEnTienda(locales).length;
     $('#contador').textContent = n ? `(${n})` : '';
+  }
+
+  // Productos de la tienda que no son los publicados desde este dispositivo.
+  function soloEnTienda(locales) {
+    const ids = new Set(locales.map(p => p.tn?.id).filter(Boolean));
+    return TN.estadoTienda().productos.filter(p => !ids.has(p.id));
   }
 
   // ---------- Opciones fijas ----------
@@ -286,9 +294,15 @@
       ? 'reemplazar' : 'completar';
   }
 
+  // Busca el código en lo cargado en este dispositivo y en lo que ya está en Tiendanube.
+  // Devuelve { nombre, sku, donde } o null.
   async function productoConCodigo(codigo) {
     if (!codigo) return null;
-    return (await DB.listar()).find(p => p.id !== actual.id && p.datos.codigo === codigo) || null;
+    const local = (await DB.listar()).find(p => p.id !== actual.id && p.datos.codigo === codigo);
+    if (local) return { nombre: TN.titulo(local.datos), sku: local.datos.sku, donde: 'en Cargados' };
+    const tienda = await TN.enTienda({ codigo, excluirId: actual.tn?.id });
+    if (tienda) return { nombre: tienda.nombre, sku: tienda.skus[0], donde: 'en Tiendanube' };
+    return null;
   }
 
   let iaEnCurso = false;
@@ -331,7 +345,7 @@
       const repetido = await productoConCodigo(form.elements.codigo.value);
       const leyo = Object.values(valoresIA(info)).some(Boolean) || info.categoria;
       if (repetido) {
-        setEstado('modo_manual', `Ojo: este código de barras ya está cargado en "${TN.titulo(repetido.datos)}". Revisá en Cargados que no sea el mismo producto.`);
+        setEstado('modo_manual', `Ojo: este código de barras ya está cargado ${repetido.donde}: "${repetido.nombre}". Revisá en Cargados que no sea el mismo producto.`);
       } else if (llenados.length) {
         const estimados = ['peso', 'alto', 'ancho', 'profundidad'].some(c => llenados.includes(c));
         const que = decision === 'nuevo' ? 'Producto nuevo: la IA completó' : decision === 'reemplazar' ? 'La IA reemplazó y completó' : 'La IA completó';
@@ -369,7 +383,7 @@
     // ¿Ya lo cargamos antes?
     const repetido = await productoConCodigo(codigo);
     if (repetido) {
-      setEstado('modo_manual', `Este código ya está cargado: "${TN.titulo(repetido.datos)}" (SKU ${repetido.datos.sku || 'sin SKU'}). Revisá la lista de Cargados antes de seguir.`);
+      setEstado('modo_manual', `Este código ya está cargado ${repetido.donde}: "${repetido.nombre}" (SKU ${repetido.sku || 'sin SKU'}). Revisá la lista de Cargados antes de seguir.`);
       return;
     }
 
@@ -634,6 +648,18 @@
     });
     if (d.codigo && otros.some(p => p.datos.codigo === d.codigo)) error('codigo', `El código ${d.codigo} ya está cargado en otro producto.`);
 
+    // Lo mismo contra lo que ya está en Tiendanube (lo haya cargado quien sea).
+    const excluirId = actual.tn?.id;
+    if (d.codigo && !otros.some(p => p.datos.codigo === d.codigo)) {
+      const t = await TN.enTienda({ codigo: d.codigo, excluirId });
+      if (t) error('codigo', `El código ${d.codigo} ya está en Tiendanube: "${t.nombre}".`);
+    }
+    for (const s of new Set([d.sku, ...TN.skus(d)].filter(Boolean))) {
+      if (usados.has(s.toLowerCase())) continue;
+      const t = await TN.enTienda({ sku: s, excluirId });
+      if (t) error(s === d.sku ? 'sku' : 'variantes', `El SKU ${s} ya está en Tiendanube: "${t.nombre}".`);
+    }
+
     return errores;
   }
 
@@ -787,53 +813,144 @@
     publicado: ['Publicado', 'bg-green-100 text-green-800'],
   };
 
+  const normalizar = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  // Todas las palabras buscadas tienen que aparecer (en cualquier orden).
+  function coincide(textos, busqueda) {
+    if (!busqueda) return true;
+    const todo = normalizar(textos.filter(Boolean).join(' '));
+    return busqueda.split(/\s+/).every(palabra => todo.includes(palabra));
+  }
+  const precioTexto = n => (n ? ` · $ ${Number(n).toLocaleString('es-AR')}` : '');
+
+  function hace(fecha) {
+    const min = Math.round((Date.now() - fecha) / 60000);
+    return min < 1 ? 'recién' : min === 1 ? 'hace 1 minuto' : `hace ${min} minutos`;
+  }
+
+  function renderEstadoTienda() {
+    const caja = $('#estado-tienda');
+    const boton = $('#btn-actualizar-tienda');
+    const t = TN.estadoTienda();
+    boton.classList.toggle('hidden', !TN.conectado());
+    boton.disabled = t.cargando;
+    boton.textContent = t.cargando ? 'Actualizando…' : 'Actualizar';
+    if (!TN.conectado()) { caja.textContent = ''; return; }
+    if (t.cargando && !t.fecha) caja.innerHTML = `${SPINNER}Trayendo los productos de Tiendanube…`;
+    else if (t.error && !t.fecha) caja.innerHTML = `<span class="text-red-600">No se pudieron traer los productos de Tiendanube: ${esc(t.error)}</span>`;
+    else if (t.fecha) caja.innerHTML = `${t.productos.length} productos en Tiendanube · actualizado ${hace(t.fecha)}${t.error ? ` · <span class="text-red-600">no se pudo actualizar: ${esc(t.error)}</span>` : ''}`;
+    else caja.textContent = '';
+  }
+
+  // Dibuja la lista con lo que hay y, si hace falta, pide la tienda y vuelve a dibujar.
+  function abrirLista({ forzar = false } = {}) {
+    renderLista();
+    if (!TN.conectado()) return;
+    const pedido = TN.productosTienda({ forzar });
+    renderEstadoTienda();
+    pedido.then(() => {
+      actualizarContador();
+      if (!$('#vista-lista').classList.contains('hidden')) renderLista();
+    });
+  }
+
+  function tarjetaTienda(p) {
+    const miniatura = p.imagen
+      ? `<img src="${esc(p.imagen)}" alt="" loading="lazy" class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl border border-slate-200 object-contain bg-white">`
+      : '<div class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl bg-slate-100"></div>';
+    const [estado, color] = p.publicado ? ['En Tiendanube', 'bg-marca-50 text-marca-800 border border-marca-200'] : ['Oculto en la tienda', 'bg-slate-100 text-slate-700'];
+    const stock = p.stock == null ? '' : ` · ${p.stock} en stock`;
+    return `
+      <article class="card !p-3 sm:!p-4">
+        <div class="flex gap-3">
+          ${miniatura}
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-col-reverse items-start gap-1 sm:flex-row sm:justify-between sm:gap-2">
+              <h2 class="font-semibold text-slate-900 leading-snug break-words">${esc(p.nombre || 'Sin nombre')}</h2>
+              <span class="shrink-0 text-xs font-medium rounded-full px-2 py-0.5 ${color}">${estado}</span>
+            </div>
+            <p class="text-sm text-slate-500 mt-0.5"><span class="font-mono">${esc(p.skus.join(', ') || 'sin SKU')}</span>${precioTexto(p.precio)}${stock}</p>
+            <p class="text-xs text-slate-400 mt-0.5">${p.fotos} ${p.fotos === 1 ? 'foto' : 'fotos'}${p.variantes ? ` · ${p.variantes} variantes` : ''}${p.codigos.length ? ` · EAN ${esc(p.codigos.join(', '))}` : ''}</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-3 sm:justify-end">
+          <button type="button" class="btn-secundario !py-2 flex-1 sm:flex-none" data-accion="ver-tienda" data-tid="${p.id}">Ver todo</button>
+        </div>
+      </article>`;
+  }
+
+  const tituloSeccion = (texto, n) => `<h2 class="text-sm font-semibold text-slate-600 pt-2">${texto} <span class="font-normal text-slate-400">(${n})</span></h2>`;
+
   async function renderLista() {
     urlsLista.forEach(u => URL.revokeObjectURL(u));
     urlsLista = [];
-    const productos = (await DB.listar()).sort((a, b) => b.actualizado - a.actualizado);
+    const todos = (await DB.listar()).sort((a, b) => b.actualizado - a.actualizado);
     $('#aviso-api').classList.toggle('hidden', TN.conectado());
+    renderEstadoTienda();
 
-    if (!productos.length) {
-      $('#lista').innerHTML = `<div class="card text-center py-10">
+    const busqueda = normalizar($('#buscar-lista').value.trim());
+    const productos = todos.filter(p => coincide([TN.titulo(p.datos), p.datos.codigo, p.datos.sku, ...TN.skus(p.datos)], busqueda));
+    const deTienda = soloEnTienda(todos)
+      .filter(p => coincide([p.nombre, ...p.skus, ...p.codigos], busqueda))
+      .sort((a, b) => String(b.actualizado).localeCompare(String(a.actualizado)));
+    const cargandoTienda = TN.conectado() && TN.estadoTienda().cargando && !TN.estadoTienda().fecha;
+
+    if (!productos.length && !deTienda.length) {
+      $('#lista').innerHTML = busqueda
+        ? `<div class="card text-center py-10"><p class="text-slate-600">No hay productos que coincidan con "${esc($('#buscar-lista').value.trim())}".</p></div>`
+        : cargandoTienda ? '' : `<div class="card text-center py-10">
         <p class="text-slate-600">Todavía no cargaste productos.</p>
         <button type="button" class="btn-primario mt-4" data-accion="nuevo">Cargar el primero</button></div>`;
       return;
     }
 
-    $('#lista').innerHTML = productos.map(p => {
-      const d = p.datos;
-      const [estado, color] = ESTADOS[p.estado];
-      let miniatura = '<div class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl bg-slate-100"></div>';
-      const fotosTienda = publicables(p.fotos);
-      if (fotosTienda[0]) {
-        const url = URL.createObjectURL(fotosTienda[0].blob);
-        urlsLista.push(url);
-        miniatura = `<img src="${url}" alt="" class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl border border-slate-200 object-contain bg-white">`;
-      }
-      const variantes = d.tieneVariantes ? ` · ${d.variantes.length} variantes` : '';
-      const precio = TN.numero(d.precio) ? ` · $ ${TN.numero(d.precio).toLocaleString('es-AR')}` : '';
-      return `
-        <article class="card !p-3 sm:!p-4">
-          <div class="flex gap-3">
-            ${miniatura}
-            <div class="min-w-0 flex-1">
-              <div class="flex items-start justify-between gap-2">
-                <h2 class="font-semibold text-slate-900 leading-snug break-words">${esc(TN.titulo(d) || 'Sin nombre')}</h2>
-                <span class="shrink-0 text-xs font-medium rounded-full px-2 py-0.5 ${color}">${estado}</span>
-              </div>
-              <p class="text-sm text-slate-500 mt-0.5"><span class="font-mono">${esc(d.sku || 'sin SKU')}</span> · ${esc(d.categoria || 'sin categoría')}${precio}</p>
-              <p class="text-xs text-slate-400 mt-0.5">${fotosTienda.length} ${fotosTienda.length === 1 ? 'foto' : 'fotos'}${variantes}${d.codigo ? ` · EAN ${esc(d.codigo)}` : ''}${Respaldo.disponible() ? (Respaldo.pendiente(p) ? ' · <span class="text-amber-700">respaldo pendiente</span>' : ' · <span class="text-green-700">respaldado ✓</span>') : ''}</p>
-              ${p.tnError ? `<p class="text-xs text-red-600 mt-1">No se pudo publicar: ${esc(p.tnError)}</p>` : ''}
-              ${p.tn?.url ? `<a href="${esc(p.tn.url)}" target="_blank" rel="noopener" class="text-xs text-marca-700 underline mt-1 inline-block">Ver en la tienda</a>` : ''}
+    const partes = [];
+    if (productos.length) {
+      if (deTienda.length) partes.push(tituloSeccion('Cargados desde este dispositivo', productos.length));
+      partes.push(...productos.map(tarjetaLocal));
+    }
+    if (deTienda.length) {
+      partes.push(tituloSeccion('Ya están en Tiendanube', deTienda.length));
+      partes.push(...deTienda.map(tarjetaTienda));
+    }
+    $('#lista').innerHTML = partes.join('');
+  }
+
+  let timerBusqueda;
+  $('#buscar-lista').addEventListener('input', () => { clearTimeout(timerBusqueda); timerBusqueda = setTimeout(renderLista, 150); });
+  $('#btn-actualizar-tienda').addEventListener('click', () => abrirLista({ forzar: true }));
+
+  function tarjetaLocal(p) {
+    const d = p.datos;
+    const [estado, color] = ESTADOS[p.estado];
+    let miniatura = '<div class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl bg-slate-100"></div>';
+    const fotosTienda = publicables(p.fotos);
+    if (fotosTienda[0]) {
+      const url = URL.createObjectURL(fotosTienda[0].blob);
+      urlsLista.push(url);
+      miniatura = `<img src="${url}" alt="" class="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl border border-slate-200 object-contain bg-white">`;
+    }
+    const variantes = d.tieneVariantes ? ` · ${d.variantes.length} variantes` : '';
+    const precio = TN.numero(d.precio) ? ` · $ ${TN.numero(d.precio).toLocaleString('es-AR')}` : '';
+    return `
+      <article class="card !p-3 sm:!p-4">
+        <div class="flex gap-3">
+          ${miniatura}
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-col-reverse items-start gap-1 sm:flex-row sm:justify-between sm:gap-2">
+              <h2 class="font-semibold text-slate-900 leading-snug break-words">${esc(TN.titulo(d) || 'Sin nombre')}</h2>
+              <span class="shrink-0 text-xs font-medium rounded-full px-2 py-0.5 ${color}">${estado}</span>
             </div>
+            <p class="text-sm text-slate-500 mt-0.5"><span class="font-mono">${esc(d.sku || 'sin SKU')}</span> · ${esc(d.categoria || 'sin categoría')}${precio}</p>
+            <p class="text-xs text-slate-400 mt-0.5">${fotosTienda.length} ${fotosTienda.length === 1 ? 'foto' : 'fotos'}${variantes}${d.codigo ? ` · EAN ${esc(d.codigo)}` : ''}${Respaldo.disponible() ? (Respaldo.pendiente(p) ? ' · <span class="text-amber-700">respaldo pendiente</span>' : ' · <span class="text-green-700">respaldado ✓</span>') : ''}</p>
+            ${p.tnError ? `<p class="text-xs text-red-600 mt-1">No se pudo publicar: ${esc(p.tnError)}</p>` : ''}
           </div>
-          <div class="flex flex-wrap gap-2 mt-3 sm:justify-end">
-            <button type="button" class="btn-secundario !py-2 flex-1 sm:flex-none" data-accion="editar" data-id="${p.id}">${p.estado === 'publicado' ? 'Ver' : 'Editar'}</button>
-            ${p.estado === 'listo' ? `<button type="button" class="btn-primario !py-2 flex-1 sm:flex-none" data-accion="publicar" data-id="${p.id}" ${TN.conectado() ? '' : 'disabled title="Falta conectar con Tiendanube"'}>Publicar</button>` : ''}
-            <button type="button" class="btn-secundario !py-2 text-red-600" data-accion="borrar" data-id="${p.id}">Borrar</button>
-          </div>
-        </article>`;
-    }).join('');
+        </div>
+        <div class="flex flex-wrap gap-2 mt-3 sm:justify-end">
+          <button type="button" class="btn-secundario !py-2 flex-1 sm:flex-none" data-accion="editar" data-id="${p.id}">${p.estado === 'publicado' ? 'Ver' : 'Editar'}</button>
+          ${p.estado === 'listo' ? `<button type="button" class="btn-primario !py-2 flex-1 sm:flex-none" data-accion="publicar" data-id="${p.id}" ${TN.conectado() ? '' : 'disabled title="Falta conectar con Tiendanube"'}>Publicar</button>` : ''}
+          <button type="button" class="btn-secundario !py-2 text-red-600" data-accion="borrar" data-id="${p.id}">Borrar</button>
+        </div>
+      </article>`;
   }
 
   $('#lista').addEventListener('click', async e => {
@@ -841,6 +958,7 @@
     if (!b) return;
     const accion = b.dataset.accion;
     if (accion === 'nuevo') { cargarEnForm(vacio()); mostrarVista('form'); return; }
+    if (accion === 'ver-tienda') { verDetalleTienda(Number(b.dataset.tid)); return; }
 
     const p = await DB.obtener(b.dataset.id);
     if (!p) return;
@@ -872,26 +990,133 @@
     }
   });
 
-  // ---------- Exportar ----------
-  $('#btn-exportar').addEventListener('click', async () => {
-    const productos = await DB.listar();
-    if (!productos.length) { aviso('No hay productos para exportar.', 'error'); return; }
-    const salida = productos.map(p => ({
-      estado: p.estado,
-      registro: TN.armarRegistro(p),
-      tiendanube: TN.armarPayload(p),
-    }));
-    const blob = new Blob([JSON.stringify(salida, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `productos-riegos-del-sur-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  // ---------- Detalle de un producto de la tienda ----------
+  // La descripción viene en HTML desde Tiendanube: se deja solo el formato básico (sin scripts, links ni estilos).
+  function descripcionSegura(html) {
+    const permitidas = new Set(['P', 'BR', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'STRONG', 'B', 'EM', 'I', 'U']);
+    const doc = new DOMParser().parseFromString(`<div>${html || ''}</div>`, 'text/html');
+    const limpiar = nodo => [...nodo.childNodes].map(n => {
+      if (n.nodeType === Node.TEXT_NODE) return esc(n.textContent);
+      if (n.nodeType !== Node.ELEMENT_NODE || ['SCRIPT', 'STYLE', 'IFRAME'].includes(n.tagName)) return '';
+      const adentro = limpiar(n);
+      if (!permitidas.has(n.tagName)) return adentro;
+      const tag = n.tagName.toLowerCase();
+      return tag === 'br' ? '<br>' : `<${tag}>${adentro}</${tag}>`;
+    }).join('');
+    return limpiar(doc.body.firstChild).trim();
+  }
+
+  const dinero = n => (n == null ? '—' : `$ ${Number(n).toLocaleString('es-AR')}`);
+  const cantidad = n => (n == null ? 'Ilimitado' : String(n));
+  const medida = (n, u) => (n ? `${Number(n).toLocaleString('es-AR')} ${u}` : '—');
+  const fecha = f => (f ? new Date(f).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+  const dato = (titulo, valor) => `<div><dt class="text-xs text-slate-500">${titulo}</dt><dd class="text-sm text-slate-900 break-words">${valor}</dd></div>`;
+
+  function renderDetalle(p) {
+    const v0 = p.variantes[0] || {};
+    const conVariantes = p.variantes.length > 1 || p.atributos.length > 0;
+    const fotos = p.imagenes.length
+      ? `<img id="detalle-foto" src="${esc(p.imagenes[0])}" alt="" class="w-full aspect-square sm:aspect-[4/3] object-contain rounded-xl border border-slate-200 bg-white">
+         ${p.imagenes.length > 1 ? `<div class="flex gap-2 mt-2 overflow-x-auto pb-1">${p.imagenes.map((src, i) => `
+           <button type="button" data-foto="${esc(src)}" class="shrink-0 rounded-lg border-2 ${i ? 'border-transparent' : 'border-marca-600'}">
+             <img src="${esc(src)}" alt="Foto ${i + 1}" loading="lazy" class="w-16 h-16 object-contain rounded-md bg-white"></button>`).join('')}</div>` : ''}`
+      : '<div class="w-full aspect-[4/3] grid place-items-center rounded-xl bg-slate-100 text-sm text-slate-500">Sin fotos</div>';
+
+    const tablaVariantes = conVariantes ? `
+      <h3 class="font-semibold text-slate-900 mt-6 mb-2">Variantes (${p.variantes.length})</h3>
+      <div class="sm:hidden space-y-2">${p.variantes.map(v => `
+        <div class="rounded-xl border border-slate-200 p-3">
+          <p class="font-medium text-slate-900">${esc(v.valores.filter(Boolean).join(' · ') || 'Variante')}</p>
+          <dl class="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
+            ${dato('Precio', dinero(v.precio))}${dato('Stock', cantidad(v.stock))}
+            ${dato('SKU', `<span class="font-mono text-xs">${esc(v.sku || '—')}</span>`)}${dato('Código', `<span class="font-mono text-xs">${esc(v.codigo || '—')}</span>`)}
+          </dl>
+        </div>`).join('')}
+      </div>
+      <div class="hidden sm:block overflow-x-auto rounded-xl border border-slate-200">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-left text-xs text-slate-500">
+            <tr>${p.atributos.map(a => `<th class="px-3 py-2 font-medium">${esc(a)}</th>`).join('')}<th class="px-3 py-2 font-medium">SKU</th><th class="px-3 py-2 font-medium">Precio</th><th class="px-3 py-2 font-medium">Stock</th><th class="px-3 py-2 font-medium">Código</th></tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">${p.variantes.map(v => `
+            <tr>${p.atributos.map((_, i) => `<td class="px-3 py-2">${esc(v.valores[i] || '—')}</td>`).join('')}
+              <td class="px-3 py-2 font-mono text-xs">${esc(v.sku || '—')}</td><td class="px-3 py-2 whitespace-nowrap">${dinero(v.precio)}</td>
+              <td class="px-3 py-2">${cantidad(v.stock)}</td><td class="px-3 py-2 font-mono text-xs">${esc(v.codigo || '—')}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : '';
+
+    const descripcion = descripcionSegura(p.descripcion);
+    const [estado, color] = p.publicado ? ['Visible en la tienda', 'bg-green-100 text-green-800'] : ['Oculto en la tienda', 'bg-slate-100 text-slate-700'];
+
+    $('#detalle-cuerpo').innerHTML = `
+      ${fotos}
+      <div class="flex flex-wrap gap-2 mt-4">
+        <span class="text-xs font-medium rounded-full px-2 py-0.5 ${color}">${estado}</span>
+        ${p.categorias.map(c => `<span class="text-xs rounded-full px-2 py-0.5 bg-marca-50 text-marca-800">${esc(c)}</span>`).join('')}
+      </div>
+      <dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 mt-4">
+        ${conVariantes ? '' : dato('SKU', `<span class="font-mono">${esc(v0.sku || '—')}</span>`)}
+        ${conVariantes ? '' : dato('Código de barras', `<span class="font-mono">${esc(v0.codigo || '—')}</span>`)}
+        ${dato('Precio', dinero(v0.precio) + (v0.precioPromocional ? ` <span class="text-green-700">(oferta ${dinero(v0.precioPromocional)})</span>` : ''))}
+        ${conVariantes ? '' : dato('Stock', cantidad(v0.stock))}
+        ${dato('Marca', esc(p.marca || '—'))}
+        ${p.requiereEnvio ? dato('Peso', medida(v0.peso, 'kg')) : dato('Envío', 'No requiere')}
+        ${p.requiereEnvio ? dato('Medidas (an × al × prof)', [v0.ancho, v0.alto, v0.profundidad].some(Boolean) ? `${[v0.ancho, v0.alto, v0.profundidad].map(n => n || '—').join(' × ')} cm` : '—') : ''}
+        ${dato('Cargado', fecha(p.creado))}
+        ${dato('Última modificación', fecha(p.actualizado))}
+      </dl>
+      ${tablaVariantes}
+      <h3 class="font-semibold text-slate-900 mt-6 mb-2">Descripción</h3>
+      <div class="text-sm text-slate-700 space-y-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold">
+        ${descripcion || '<p class="text-slate-500">Sin descripción.</p>'}
+      </div>
+      ${p.etiquetas ? `<p class="text-xs text-slate-500 mt-4">Etiquetas: ${esc(p.etiquetas)}</p>` : ''}`;
+  }
+
+  let detalleAbierto = null;
+  async function verDetalleTienda(id) {
+    const resumen = TN.estadoTienda().productos.find(p => p.id === id);
+    detalleAbierto = id;
+    $('#detalle-titulo').textContent = resumen?.nombre || 'Producto';
+    $('#detalle-cuerpo').innerHTML = `<p class="text-sm text-slate-600 py-10 text-center">${SPINNER}Cargando el producto…</p>`;
+    $('#detalle').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    try {
+      const p = await TN.detalleTienda(id);
+      if (detalleAbierto !== id) return; // se cerró o se abrió otro
+      $('#detalle-titulo').textContent = p.nombre || 'Sin nombre';
+      renderDetalle(p);
+    } catch (e) {
+      if (detalleAbierto !== id) return;
+      $('#detalle-cuerpo').innerHTML = `<p class="text-sm text-red-600 py-10 text-center">No se pudo traer el producto: ${esc(e.message)}</p>`;
+    }
+  }
+
+  function cerrarDetalle() {
+    detalleAbierto = null;
+    $('#detalle').classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+  $('#detalle-cerrar').addEventListener('click', cerrarDetalle);
+  $('#detalle').addEventListener('click', e => {
+    if (e.target.id === 'detalle') { cerrarDetalle(); return; }
+    const mini = e.target.closest('[data-foto]');
+    if (!mini) return;
+    $('#detalle-foto').src = mini.dataset.foto;
+    $$('[data-foto]', $('#detalle')).forEach(b => b.classList.toggle('border-marca-600', b === mini));
+    $$('[data-foto]', $('#detalle')).forEach(b => b.classList.toggle('border-transparent', b !== mini));
   });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#detalle').classList.contains('hidden')) cerrarDetalle(); });
 
   // ---------- Inicio ----------
   cargarEnForm(vacio());
-  TN.cargarEstado().then(() => { renderFotos(); Respaldo.sincronizar(); });
+  TN.cargarEstado().then(() => {
+    renderFotos();
+    Respaldo.sincronizar();
+    // Trae lo que ya está en la tienda: para el contador y para avisar repetidos al escanear.
+    TN.productosTienda().then(() => actualizarContador().catch(() => {}));
+  });
 
   // ---------- Respaldo en la nube ----------
   // Reintenta lo pendiente cada minuto y al recuperar la conexión.

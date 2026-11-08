@@ -235,5 +235,41 @@ window.TN = (() => {
     }
   }
 
-  return { armarNombre, titulo, armarPayload, armarRegistro, sinEnvio, skus, numero, slug, sugerirCategoria, cargarEstado, estado, conectado, buscarCodigo, publicar, sesion, ingresar, salir, completarConIA };
+  // ---------- Productos que ya están en la tienda ----------
+  // Se guardan en memoria; se vuelven a pedir si pasó más de un minuto o si se fuerza.
+  let tienda = { productos: [], fecha: 0, error: null, pedido: null };
+  const VIGENCIA_MS = 60000;
+
+  function productosTienda({ forzar = false } = {}) {
+    if (!conectado()) return Promise.resolve([]);
+    if (tienda.pedido) return tienda.pedido;
+    if (!forzar && tienda.fecha && Date.now() - tienda.fecha < VIGENCIA_MS) return Promise.resolve(tienda.productos);
+    tienda.pedido = exigir('GET', '/api/tienda-productos')
+      .then(r => {
+        tienda.productos = r.productos || [];
+        tienda.fecha = Date.now();
+        tienda.error = null;
+        return tienda.productos;
+      })
+      .catch(e => { tienda.error = e.message; return tienda.productos; })
+      .finally(() => { tienda.pedido = null; });
+    return tienda.pedido;
+  }
+  // Lo que ya está en memoria, sin pedir nada (para dibujar la lista al instante).
+  const estadoTienda = () => ({ productos: tienda.productos, cargando: !!tienda.pedido, fecha: tienda.fecha, error: tienda.error });
+
+  // Busca en la tienda por código de barras o SKU. Si no se pudo consultar, devuelve null.
+  async function enTienda({ codigo, sku, excluirId } = {}) {
+    const lista = await productosTienda();
+    const c = String(codigo || '').trim();
+    const s = String(sku || '').trim().toLowerCase();
+    return lista.find(p => p.id !== excluirId && (
+      (c && p.codigos.includes(c)) || (s && p.skus.some(x => x.toLowerCase() === s))
+    )) || null;
+  }
+
+  // Todos los datos de un producto de la tienda (para la ventana de detalle).
+  const detalleTienda = id => exigir('GET', `/api/tienda-producto?id=${encodeURIComponent(id)}`);
+
+  return { detalleTienda, armarNombre, titulo, armarPayload, armarRegistro, sinEnvio, skus, numero, slug, sugerirCategoria, cargarEstado, estado, conectado, buscarCodigo, publicar, sesion, ingresar, salir, completarConIA, productosTienda, estadoTienda, enTienda };
 })();
